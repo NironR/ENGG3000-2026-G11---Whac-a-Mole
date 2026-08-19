@@ -1,4 +1,7 @@
-#include "BluetoothSerial.h";
+#include "BluetoothSerial.h"
+BluetoothSerial SerialBT;
+
+#define BOX_ID 1  // SENSOR BOX NO.
 
 //Ultrasonic sensor pins
 int echoPin1 = 5;
