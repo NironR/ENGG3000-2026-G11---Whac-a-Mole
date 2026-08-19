@@ -8,6 +8,7 @@ import random
 root = tk.Tk()
 root.title("Whack-a-Mole")
 root.geometry("600x450")
+root.minsize(400,300)
 root.resizable(True, True)
 
 
@@ -26,8 +27,8 @@ next_mole_timer = None
 
 difficulty_settings = {
     "Easy": {
-        "up_time": (1000, 1800),
-        "wait_time": (800, 1500)
+        "up_time": (600, 1200), # Longer number will make mole stay up longer
+        "wait_time": (400, 900) # How fast mole will appear
     },
 
 }
@@ -43,10 +44,29 @@ ROOM_WIDTH_M = 2.0
 ROOM_HEIGHT_M = ROOM_WIDTH_M * (DESIGN_HEIGHT / DESIGN_WIDTH)
 GRID_ROWS =  2
 GRID_COLS = 3
-WHACK_RADISU_M = 0.15
+WHACK_RADIUS_M = 0.1501
 cursor_x_m = 0.0
 cursor_y_m = 0.0
+HOLE_LAYOUT_FRACTIONS= [
+     (1/6,1/4),
+     (3/6, 1/4),
+     (5/6, 1/4),
+     (1/6, 3/4),
+     (3/6, 3/4),
+     (5/6, 3/4),
+
+]
+holes = []
+hole_radius_x=45
+hole_radius_y=20
+mole_radius_x = 25
+mole_radius_y_up = 40
+mole_radius_y_down = 10
+last_canvas_size = (0,0)
+
 def pixel_to_metres (px,py):
+    width = max (canvas.winfo_width(), 1)
+    height = max(canvas.winfo_height(),1)
     x_m = (px / DESIGN_WIDTH) * ROOM_WIDTH_M
     y_m = (py / DESIGN_HEIGHT) * ROOM_HEIGHT_M
     return x_m, y_m
@@ -124,7 +144,7 @@ def create_game():
 
     global canvas
     global score_label
-    global holes
+    global coord_label
 
     score_label = tk.Label(
         root,
@@ -137,40 +157,87 @@ def create_game():
         root,
         width=DESIGN_WIDTH,
         height=DESIGN_HEIGHT,
-        bg="lightgreen"
+        bg="lightgreen",
+        highlightthickness=0
     )
-    canvas.pack()
+    canvas.pack(fill=tk.BOTH, expand=True)
 
-    holes = [
-        (100, 100),
-        (300, 100),
-        (500, 100),
-        (100, 280),
-        (300, 280),
-        (500, 280)
-    ]
+    coord_label = canvas.create_text(
+        10,10,
+        anchor="sw",
+        text="x=0.00m, y=0.00m",
+        fill="black",
+        font=("Arial", 12, "bold")
+    )
+        
 
-    # Draw holes
-    for x, y in holes:
-
-        canvas.create_oval(
-            x - 45,
-            y - 20,
-            x + 45,
-            y + 20,
-            fill="black"
-        )
 
     canvas.bind("<Motion>", track_cursor)
+    canvas.bind("<Configure>", on_canvas_resize)
 
     # Start first mole
     schedule_next_mole()
+    
+# -------------------------
+#Resize
+# -------------------------    
+def layout_hole():
+    global holes, hole_radius_x, hole_radius_y
+    global mole_radius_x, mole_radius_y_up, mole_radius_y_down
+    width = canvas.winfo_width()
+    height = canvas.winfo_height()
+    if width <= 50 or height <= 50:
+        return
+    
+    scale = min (width/ DESIGN_WIDTH, height / DESIGN_HEIGHT)
+    hole_radius_x = 45*scale
+    hole_radius_y = 20*scale
+    mole_radius_x = 25*scale
+    mole_radius_y_up = 40*scale
+    mole_radius_y_down = 10*scale
+    canvas.delete("hole")
+    holes = []
+    for fx,fy in HOLE_LAYOUT_FRACTIONS:
+        x = fx*width
+        y = fy*height
+        holes.append((x,y))
+        canvas.create_oval(
+            x-hole_radius_x,
+            y - hole_radius_y,
+            x+hole_radius_x,
+            y+hole_radius_y,
+            fill = "black",
+            tags="hole"
+            )
+        canvas.coords(coord_label, 10, height -10)
+        canvas.tag_raise(coord_label)
+def on_canvas_resize(event):
+    global last_canvas_size, mole, mole_timer, next_mole_timer
+    new_size = (event.width, event.height)
+    if new_size == last_canvas_size:
+        return
+    last_canvas_size = new_size
+    
+    if mole is not None:
+        canvas.delete(mole)
+        mole = None
+        
+    if mole_timer is not None:
+        root.after_cancel(mole_timer)
+        mole_timer = None
+    if next_mole_timer is not None:
+        root.after_cancel(next_mole_timer)
+        next_mole_timer = None
+    layout_hole()
+    if game_running:
+        schedule_next_mole()
 # -------------------------
 #Tracking Cursor
 # -------------------------
 def track_cursor(event):
     global cursor_x_m, cursor_y_m
     cursor_x_m, cursor_y_m = pixel_to_metres(event.x, event.y)
+    canvas.itemconfig(coord_label, text=f"x={cursor_x_m:.2f}m y={cursor_y_m:.2f}m")
     check_whack()
     print(f"cursor px=({event.x}, {event.y})  m=({cursor_x_m:.2f}, {cursor_y_m:.2f})")
 # -------------------------
@@ -211,7 +278,9 @@ def show_mole():
     # Make sure there isn't already a mole
     if mole is not None:
         return
-
+    if not holes:
+        schedule_next_mole()
+        return
     # Pick random hole
     mole_position = random.choice(holes)
 
@@ -219,10 +288,10 @@ def show_mole():
 
     # Create mole
     mole = canvas.create_oval(
-        x - 25,
-        y - 40,
-        x + 25,
-        y + 10,
+        x - mole_radius_x,
+        y - mole_radius_y_up,
+        x+mole_radius_x,
+        y+mole_radius_y_down,
         fill="brown"
     )
 
@@ -277,10 +346,13 @@ def check_whack():
         return
 
     mole_x, mole_y = mole_position
-    mole_cell = get_hole_grid_cell(mole_x, mole_y)
-    cursor_cell = get_grid_cell(cursor_x_m, cursor_y_m)
+    mole_x_m, mole_y_m = pixel_to_metres(mole_x,mole_y)
+    dx = cursor_x_m - mole_x_m
+    dy = cursor_y_m - mole_y_m
+    distance_m = (dx*dx+dy*dy)**0.5
+    if distance_m <= WHACK_RADIUS_M:
     # Check whether click hit the mole
-    if mole_cell == cursor_cell:
+    
 
 
         # Increase score
@@ -319,9 +391,6 @@ def return_to_menu(event=None):
     global mole
     global mole_timer
     global next_mole_timer
-    if root.attributes("-fullscreen"):
-        root.attributes("-fullscreen", False)
-        return
     # Stop the game
     game_running = False
 
