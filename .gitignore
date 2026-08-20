@@ -1,0 +1,12 @@
+# PyInstaller build output
+/build/
+/dist/
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+
+# Local virtual environments
+.venv/
+venv/
+Whack-a-Mole.spec

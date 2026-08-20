@@ -105,12 +105,51 @@ sensor_far_mm = 1400 # placeholder value, change to real measured reading
 latest_distance_mm = None
 distance_lock = threading.Lock()
 
+def serial_thread():
+    global latest_distance_mm
+
+    if not serial_available:
+        return
+
+    try:
+        connection = serial.Serial(box_port, baud_rate, timeout=1)
+    except serial.SerialException:
+        return
+
+    with connection:
+        while True:
+            line = connection.readline().decode("ascii", errors="ignore").strip()
+            parts = line.split()
+            if len(parts) != 3 or parts[1] != "DIST":
+                continue
+
+            try:
+                distance_mm = int(parts[2])
+            except ValueError:
+                continue
+
+            with distance_lock:
+                latest_distance_mm = distance_mm
+
 def distance_to_metres(distance_mm):
-#Maps the raw distance readings to the y-coordinate in metres
     span = sensor_far_mm - sensor_near_mm
     fraction = (distance_mm - sensor_near_mm) / span
     fraction = max(0.0, min(1.0, fraction))
     return fraction * ROOM_HEIGHT_M
+
+def poll_sensor():
+    with distance_lock:
+        distance = latest_distance_mm
+
+    if distance is not None and game_running:
+        cursor_x_m = ROOM_WIDTH_M / 2
+        cursor_y_m = distance_to_metres(distance)
+
+        canvas.itemconfig(coord_label, text=f"x={cursor_x_m:.2f}m y={cursor_y_m:.2f}m (sensor)")
+        check_whack()
+
+    root.after(50, poll_sensor)
+        
 
     
 # -------------------------
@@ -453,4 +492,5 @@ bt_thread.start()
 start_menu()
 root.bind("<Escape>", return_to_menu)
 root.bind("<F11>", toggle_fullscreen)
+root.after(50, poll_sensor)
 root.mainloop()
