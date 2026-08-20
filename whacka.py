@@ -105,6 +105,13 @@ sensor_far_mm = 1400 # placeholder value, change to real measured reading
 latest_distance_mm = None
 distance_lock = threading.Lock()
 
+def distance_to_metres(distance_mm):
+#Maps the raw distance readings to the y-coordinate in metres
+    span = sensor_far_mm - sensor_near_mm
+    fraction = (distance_mm - sensor_near_mm) / span
+    fraction = max(0.0, min(1.0, fraction))
+    return fraction * ROOM_HEIGHT_M
+
     
 # -------------------------
 # Start Menu
@@ -439,7 +446,10 @@ def return_to_menu(event=None):
     start_menu()
 # -------------------------
 # Start
-# -------------------------    
+# -------------------------  
+bt_thread = threading.Thread(target=serial_thread, daemon=True)
+bt_thread.start() 
+
 start_menu()
 root.bind("<Escape>", return_to_menu)
 root.bind("<F11>", toggle_fullscreen)
