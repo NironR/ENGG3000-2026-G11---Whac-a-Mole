@@ -1,3 +1,4 @@
+import threading
 import tkinter as tk
 import random
 
@@ -9,7 +10,6 @@ try:
     serial_available = True
 except ImportError:
     serial_available = False
-
 
 # -------------------------
 # Main Window
@@ -88,6 +88,23 @@ def get_grid_cell(x_m, y_m):
     return row, col
 def get_hole_grid_cell(px, py):
     return get_grid_cell (*pixel_to_metres(px, py))
+
+# --------------------------
+# Serial Communication (Bluetooth)
+#-------------------------
+
+box_port = "COM6" #change to whichever port the bluetooth module is connected to
+baud_rate = 115200
+box_key = "box1" #change to whichever box \
+
+# TODO: calibrate against real measured bench-test readings (mm), once done, replace placeholder values w real readings
+# when a person stands at the near edge of the play zone, and the far edge.
+sensor_near_mm = 100 # placeholder value, change to real measured reading
+sensor_far_mm = 1400 # placeholder value, change to real measured reading
+
+latest_distance_mm = None
+distance_lock = threading.Lock()
+
     
 # -------------------------
 # Start Menu
