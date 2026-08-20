@@ -1,6 +1,16 @@
 import tkinter as tk
 import random
 
+#--------------------------
+#Serial import
+#-------------------------
+try:
+    import serial
+    serial_available = True
+except ImportError:
+    serial_available = False
+
+
 # -------------------------
 # Main Window
 # -------------------------
@@ -40,8 +50,8 @@ current_difficulty = "Easy"
 # -------------------------
 DESIGN_WIDTH = 600
 DESIGN_HEIGHT = 380
-ROOM_WIDTH_M = 2.0
-ROOM_HEIGHT_M = ROOM_WIDTH_M * (DESIGN_HEIGHT / DESIGN_WIDTH)
+ROOM_WIDTH_M = 1.5
+ROOM_HEIGHT_M = 1.4
 GRID_ROWS =  2
 GRID_COLS = 3
 WHACK_RADIUS_M = 0.1501
