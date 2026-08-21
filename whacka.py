@@ -109,27 +109,34 @@ def serial_thread():
     global latest_distance_mm
 
     if not serial_available:
+        print("pySerial not available. Serial communication disabled.")
         return
 
-    try:
-        connection = serial.Serial(box_port, baud_rate, timeout=1)
-    except serial.SerialException:
+    try: 
+        ser = serial.Serial(box_port, baud_rate, timeout=1)
+        print(f"Connected to {box_port} at {baud_rate} baud.")
+    except serial.SerialException as e:
+        print(f"Error opening serial port {box_port}: {e}")
         return
 
-    with connection:
-        while True:
-            line = connection.readline().decode("ascii", errors="ignore").strip()
+    while True:
+        try:
+            line = ser.readline().decode("utf-8", errors="ignore").strip()
+            if not line:
+													 
+                continue
             parts = line.split()
-            if len(parts) != 3 or parts[1] != "DIST":
-                continue
-
-            try:
-                distance_mm = int(parts[2])
-            except ValueError:
-                continue
-
-            with distance_lock:
-                latest_distance_mm = distance_mm
+            if parts and parts[0] == "Sent:":
+                parts = parts[1:]
+            if len(parts) == 3 and parts[0] == box_key and parts[1] == "DIST":
+                try:
+                    with distance_lock:
+                        latest_distance_mm = int(parts[2])
+                except ValueError:
+                    pass
+        except serial.SerialException:
+            print("Lost connection to box")
+            break
 
 def distance_to_metres(distance_mm):
     span = sensor_far_mm - sensor_near_mm
@@ -139,7 +146,7 @@ def distance_to_metres(distance_mm):
 
 def poll_sensor():
     with distance_lock:
-        distance = latest_distance_mm
+        distance = latest_distance_mm 
 
     if distance is not None and game_running:
         cursor_x_m = ROOM_WIDTH_M / 2
