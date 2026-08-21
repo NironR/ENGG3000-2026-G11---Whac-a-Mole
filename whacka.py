@@ -95,7 +95,7 @@ def get_hole_grid_cell(px, py):
 
 box_port = "COM6" #change to whichever port the bluetooth module is connected to
 baud_rate = 115200
-box_key = "box1" #change to whichever box \
+box_key = "1" #change to whichever box \
 
 # TODO: calibrate against real measured bench-test readings (mm), once done, replace placeholder values w real readings
 # when a person stands at the near edge of the play zone, and the far edge.
@@ -128,7 +128,7 @@ def serial_thread():
             parts = line.split()
             if parts and parts[0] == "Sent:":
                 parts = parts[1:]
-            if len(parts) == 3 and parts[0] == box_key and parts[1] == "DIST":
+            if len(parts) == 3 and parts[0] in (box_key, f"box{box_key}") and parts[1] == "DIST":
                 try:
                     with distance_lock:
                         latest_distance_mm = int(parts[2])
@@ -145,6 +145,8 @@ def distance_to_metres(distance_mm):
     return fraction * ROOM_HEIGHT_M
 
 def poll_sensor():
+    global cursor_x_m, cursor_y_m
+
     with distance_lock:
         distance = latest_distance_mm 
 
