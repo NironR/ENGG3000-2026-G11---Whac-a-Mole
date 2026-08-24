@@ -1,5 +1,15 @@
+import threading
 import tkinter as tk
 import random
+
+#--------------------------
+#Serial import
+#-------------------------
+try:
+    import serial
+    serial_available = True
+except ImportError:
+    serial_available = False
 
 # -------------------------
 # Main Window
@@ -40,8 +50,8 @@ current_difficulty = "Easy"
 # -------------------------
 DESIGN_WIDTH = 600
 DESIGN_HEIGHT = 380
-ROOM_WIDTH_M = 2.0
-ROOM_HEIGHT_M = ROOM_WIDTH_M * (DESIGN_HEIGHT / DESIGN_WIDTH)
+ROOM_WIDTH_M = 1.5
+ROOM_HEIGHT_M = 1.4
 GRID_ROWS =  2
 GRID_COLS = 3
 WHACK_RADIUS_M = 0.1501
@@ -78,6 +88,78 @@ def get_grid_cell(x_m, y_m):
     return row, col
 def get_hole_grid_cell(px, py):
     return get_grid_cell (*pixel_to_metres(px, py))
+
+# --------------------------
+# Serial Communication (Bluetooth)
+#-------------------------
+
+box_port = "COM6" #change to whichever port the bluetooth module is connected to
+baud_rate = 115200
+box_key = "1" #change to whichever box \
+
+# TODO: calibrate against real measured bench-test readings (mm), once done, replace placeholder values w real readings
+# when a person stands at the near edge of the play zone, and the far edge.
+sensor_near_mm = 100 # placeholder value, change to real measured reading
+sensor_far_mm = 1400 # placeholder value, change to real measured reading
+
+latest_distance_mm = None
+distance_lock = threading.Lock()
+
+def serial_thread():
+    global latest_distance_mm
+
+    if not serial_available:
+        print("pySerial not available. Serial communication disabled.")
+        return
+
+    try: 
+        ser = serial.Serial(box_port, baud_rate, timeout=1)
+        print(f"Connected to {box_port} at {baud_rate} baud.")
+    except serial.SerialException as e:
+        print(f"Error opening serial port {box_port}: {e}")
+        return
+
+    while True:
+        try:
+            line = ser.readline().decode("utf-8", errors="ignore").strip()
+            if not line:
+													 
+                continue
+            parts = line.split()
+            if parts and parts[0] == "Sent:":
+                parts = parts[1:]
+            if len(parts) == 3 and parts[0] in (box_key, f"box{box_key}") and parts[1] == "DIST":
+                try:
+                    with distance_lock:
+                        latest_distance_mm = int(parts[2])
+                except ValueError:
+                    pass
+        except serial.SerialException:
+            print("Lost connection to box")
+            break
+
+def distance_to_metres(distance_mm):
+    span = sensor_far_mm - sensor_near_mm
+    fraction = (distance_mm - sensor_near_mm) / span
+    fraction = max(0.0, min(1.0, fraction))
+    return fraction * ROOM_HEIGHT_M
+
+def poll_sensor():
+    global cursor_x_m, cursor_y_m
+
+    with distance_lock:
+        distance = latest_distance_mm 
+
+    if distance is not None and game_running:
+        cursor_x_m = ROOM_WIDTH_M / 2
+        cursor_y_m = distance_to_metres(distance)
+
+        canvas.itemconfig(coord_label, text=f"x={cursor_x_m:.2f}m y={cursor_y_m:.2f}m (sensor)")
+        check_whack()
+
+    root.after(50, poll_sensor)
+        
+
     
 # -------------------------
 # Start Menu
@@ -412,8 +494,12 @@ def return_to_menu(event=None):
     start_menu()
 # -------------------------
 # Start
-# -------------------------    
+# -------------------------  
+bt_thread = threading.Thread(target=serial_thread, daemon=True)
+bt_thread.start() 
+
 start_menu()
 root.bind("<Escape>", return_to_menu)
 root.bind("<F11>", toggle_fullscreen)
+root.after(50, poll_sensor)
 root.mainloop()
