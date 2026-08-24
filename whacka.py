@@ -29,6 +29,7 @@ root.resizable(True, True)
 score = 0
 mole = None
 mole_position = None
+cursor_indicator = None
 game_running = False
 
 # Timer IDs
@@ -77,8 +78,8 @@ last_canvas_size = (0,0)
 def pixel_to_metres (px,py):
     width = max (canvas.winfo_width(), 1)
     height = max(canvas.winfo_height(),1)
-    x_m = (px / DESIGN_WIDTH) * ROOM_WIDTH_M
-    y_m = (py / DESIGN_HEIGHT) * ROOM_HEIGHT_M
+    x_m = (px / width) * ROOM_WIDTH_M
+    y_m = (py / height) * ROOM_HEIGHT_M
     return x_m, y_m
 def get_grid_cell(x_m, y_m):
     col = int(x_m / (ROOM_WIDTH_M / GRID_COLS))
@@ -155,6 +156,7 @@ def poll_sensor():
         cursor_y_m = distance_to_metres(distance)
 
         canvas.itemconfig(coord_label, text=f"x={cursor_x_m:.2f}m y={cursor_y_m:.2f}m (sensor)")
+        update_cursor_indicator()
         check_whack()
 
     root.after(50, poll_sensor)
@@ -227,6 +229,7 @@ def create_game():
     global canvas
     global score_label
     global coord_label
+    global cursor_indicator
 
     score_label = tk.Label(
         root,
@@ -251,6 +254,13 @@ def create_game():
         fill="black",
         font=("Arial", 12, "bold")
     )
+    cursor_indicator = canvas.create_oval(
+        0, 0, 0, 0,
+        fill="red",
+        outline="red",
+        state=tk.HIDDEN,
+        tags="cursor_indicator"
+    )
         
 
 
@@ -259,6 +269,7 @@ def create_game():
 
     # Start first mole
     schedule_next_mole()
+    update_cursor_indicator()
     
 # -------------------------
 #Resize
@@ -291,8 +302,10 @@ def layout_hole():
             fill = "black",
             tags="hole"
             )
-        canvas.coords(coord_label, 10, height -10)
-        canvas.tag_raise(coord_label)
+    canvas.tag_raise(cursor_indicator)
+    canvas.coords(coord_label, 10, height -10)
+    canvas.tag_raise(coord_label)
+    update_cursor_indicator()
 def on_canvas_resize(event):
     global last_canvas_size, mole, mole_timer, next_mole_timer
     new_size = (event.width, event.height)
@@ -320,6 +333,7 @@ def track_cursor(event):
     global cursor_x_m, cursor_y_m
     cursor_x_m, cursor_y_m = pixel_to_metres(event.x, event.y)
     canvas.itemconfig(coord_label, text=f"x={cursor_x_m:.2f}m y={cursor_y_m:.2f}m")
+    update_cursor_indicator()
     check_whack()
     print(f"cursor px=({event.x}, {event.y})  m=({cursor_x_m:.2f}, {cursor_y_m:.2f})")
 # -------------------------
@@ -457,6 +471,38 @@ def check_whack():
 
         # Schedule ONE new mole
         schedule_next_mole()
+
+def update_cursor_indicator():
+    if cursor_indicator is None or not holes or not game_running:
+        return
+
+    cursor_cell = get_grid_cell(cursor_x_m, cursor_y_m)
+    target_hole = next(
+        (hole for hole in holes if get_hole_grid_cell(*hole) == cursor_cell),
+        None
+    )
+    if target_hole is None:
+        canvas.itemconfigure(cursor_indicator, state=tk.HIDDEN)
+        return
+
+    x, y = target_hole
+    indicator_radius = max(5, min(canvas.winfo_width(), canvas.winfo_height()) * 0.012)
+    canvas.coords(
+        cursor_indicator,
+        x - indicator_radius,
+        y - indicator_radius,
+        x + indicator_radius,
+        y + indicator_radius
+    )
+    canvas.itemconfigure(cursor_indicator, state=tk.NORMAL)
+
+def update_coord_display():
+    if game_running:
+        grid_row, grid_col = get_hole_grid_cell(cursor_x_m, cursor_y_m)
+        coord_label.config(
+            text=f"x={cursor_x_m:.2f}m y={cursor_y_m:.2f}m (grid: {grid_row},{grid_col})"
+        )
+    root.after(50, update_coord_display)
 
 # -------------------------
 # Fullscreen Toggle
