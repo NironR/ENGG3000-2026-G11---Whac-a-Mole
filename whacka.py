@@ -35,15 +35,52 @@ game_running = False
 mole_timer = None
 next_mole_timer = None
 
+
+# Difficulty settings for each game level
+# Higher levels make the mole appear for a shorter time
+# and reduce the waiting time between moles
 difficulty_settings = {
     "Easy": {
-        "up_time": (600, 1200), # Longer number will make mole stay up longer
-        "wait_time": (400, 900) # How fast mole will appear
+        "up_time": (900, 1200), # Longer number will make mole stay up longer
+        "wait_time": (700, 1000), # How fast mole will appear
+        "mole_scale": 1.0             # Normal mole size
+    },
+    "Medium": {
+        "up_time": (600, 900), # Longer number will make mole stay up longer
+        "wait_time": (450, 700), # How fast mole will appear
+        "mole_scale": 0.8             # Mole is reduced to 80% of normal size
+    },
+    "Hard": {
+        "up_time": (350, 600), # Longer number will make mole stay up longer
+        "wait_time": (250, 450), # How fast mole will appear
+        "mole_scale": 0.6             # Mole is reduced to 60% of normal size
     },
 
 }
 
+# Update the difficulty level based on the player's score
+# 0-7 points = Easy
+# 8-19 points = Medium
+# 20+ points = Hard
+
+# ---------------- Combo Difficulty System ----------------
+# Tracks consecutive successful hits.
+# A higher combo increases the difficulty more quickly.
+# Combo 3 = Medium difficulty
+# Combo 5 = Hard difficulty
+# The combo resets when the player misses a mole.
+# ---------------------------------------------------------
+combo = 0
 current_difficulty = "Easy"
+def update_difficulty():
+    global current_difficulty
+
+    if score >= 20 or combo >= 5:
+        current_difficulty = "Hard"
+    elif score >= 8 or combo >= 3:
+        current_difficulty = "Medium"
+    else:
+        current_difficulty = "Easy"
 
 # -------------------------
 #Grid tracking
@@ -206,10 +243,12 @@ def start_game(difficulty):
 
     global current_difficulty
     global score
+    global combo
     global game_running
 
     current_difficulty = difficulty
     score = 0
+    combo = 0
     game_running = True
 
     for widget in root.winfo_children():
@@ -230,7 +269,7 @@ def create_game():
 
     score_label = tk.Label(
         root,
-        text="Score: 0",
+        text="Score: 0 | Combo: 0 | Level: Easy",
         font=("Arial", 18, "bold")
     )
     score_label.pack(pady=5)
@@ -368,13 +407,22 @@ def show_mole():
 
     x, y = mole_position
 
-    # Create mole
+    # Get the mole size for the current difficulty level
+    mole_scale = difficulty_settings[current_difficulty]["mole_scale"]
+
+    # Calculate the mole size based on the difficulty
+    # Easy uses the normal size, while Medium and Hard use smaller sizes
+    current_mole_radius_x = mole_radius_x * mole_scale
+    current_mole_radius_y_up = mole_radius_y_up * mole_scale
+    current_mole_radius_y_down = mole_radius_y_down * mole_scale
+
+    # Create the mole using the adjusted size
     mole = canvas.create_oval(
-        x - mole_radius_x,
-        y - mole_radius_y_up,
-        x+mole_radius_x,
-        y+mole_radius_y_down,
-        fill="brown"
+        x - current_mole_radius_x,
+        y - current_mole_radius_y_up,
+        x + current_mole_radius_x,
+        y + current_mole_radius_y_down,
+    fill="brown"
     )
 
     # Decide how long mole stays up
@@ -400,9 +448,21 @@ def hide_mole():
 
     global mole
     global mole_timer
+    global combo
 
-    # Delete mole
+    # If the mole disappears without being hit,
+    # the player's combo is broken
     if mole is not None:
+
+        combo = 0
+
+        # Recalculate difficulty after combo is reset
+        update_difficulty()
+
+        # Update the display
+        score_label.config(
+            text=f"Score: {score} | Combo: {combo} | Level: {current_difficulty}"
+        )
 
         canvas.delete(mole)
         mole = None
@@ -420,6 +480,7 @@ def hide_mole():
 def check_whack():
 
     global score
+    global combo
     global mole
     global mole_timer
 
@@ -437,11 +498,18 @@ def check_whack():
     
 
 
-        # Increase score
+        # Increase score after a successful hit
         score += 1
 
+        # Increase combo after a consecutive successful hit
+        combo += 1
+
+        # Check whether the difficulty level should increase
+        update_difficulty()
+
+        # Display the current score and difficulty level
         score_label.config(
-            text="Score: " + str(score)
+            text=f"Score: {score} | Combo: {combo} | Level: {current_difficulty}"
         )
 
         # IMPORTANT:
