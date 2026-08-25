@@ -1,6 +1,10 @@
 import threading
 import tkinter as tk
 import random
+import pygame
+
+pygame.mixer.init()
+pygame.mixer.music.load("dragon-studio-censor-beep-1-372459 copy.mp3")
 
 #--------------------------
 #Serial import
@@ -250,6 +254,8 @@ def start_game(difficulty):
     score = 0
     combo = 0
     game_running = True
+
+    pygame.mixer.music.play(-1)
 
     for widget in root.winfo_children():
         widget.destroy()
@@ -543,6 +549,8 @@ def return_to_menu(event=None):
     global next_mole_timer
     # Stop the game
     game_running = False
+
+    pygame.mixer.music.stop()
 
     # Cancel existing timers
     if mole_timer is not None:
