@@ -1,6 +1,8 @@
 import threading
 import tkinter as tk
 import random
+import winsound
+import time
 
 #--------------------------
 #Serial import
@@ -120,15 +122,47 @@ def serial_thread():
         print(f"Error opening serial port {box_port}: {e}")
         return
 
+    # Prevent warning beeps from playing too quickly in succession
+    last_warning_beep = 0.00
+    warning_beep_interval = 0.5 # seconds
+
+
     while True:
         try:
             line = ser.readline().decode("utf-8", errors="ignore").strip()
+
             if not line:
-													 
                 continue
+
             parts = line.split()
             if parts and parts[0] == "Sent:":
                 parts = parts[1:]
+
+            #--------------------------
+            # Warning detection
+            #--------------------------
+
+            if (
+                len(parts) == 2
+                and parts[0] in (box_key, f"box{box_key}")
+                and parts[1] == "WARNING"
+            ):
+                print ("WARNING: Player is within 50cm of sensor")
+
+                current_time = time.monotonic()
+
+                if current_time - last_warning_beep >= warning_beep_interval:
+                    last_warning_beep = current_time
+
+                    threading.Thread(
+                        target=winsound.Beep,
+                        args=(1000, 200),
+                        daemon=True
+                    ).start()
+
+                continue
+        
+
             if len(parts) == 3 and parts[0] in (box_key, f"box{box_key}") and parts[1] == "DIST":
                 try:
                     with distance_lock:
