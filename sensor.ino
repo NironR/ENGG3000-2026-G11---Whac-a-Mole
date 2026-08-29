@@ -13,6 +13,10 @@ int trigPin2 = 21;
 const unsigned long SLOT_DURATION_MS = 40; // each box's slot within the cycle
 const unsigned long CYCLE_MS = SLOT_DURATION_MS * 3; // total cycle duration for all boxes
 
+// Warning Distance
+const long WARNING_DISTANCE_MM = 500; // 50cm
+
+
 void setup() {
   Serial.begin(115200);
 
@@ -39,6 +43,14 @@ void loop() {
   if (isMySlot) {
     long d1 = readUltraSonicDistanceMm(trigPin1, echoPin1);
     long d2 = readUltraSonicDistanceMm(trigPin2, echoPin2);
+
+    bool warning =
+    (d1 >= 0 && d1 <= WARNING_DISTANCE_MM) || (d2 >= 0 && d2 <= WARNING_DISTANCE_MM); 
+
+    if (warning) {
+      SerialBT.println(String(BOX_ID) + " WARNING");
+      Serial.println(String(BOX_ID) + " WARNING");
+    }
 
     long combined = combineReadings(d1, d2);
 
