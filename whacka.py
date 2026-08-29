@@ -1,8 +1,15 @@
 import threading
 import tkinter as tk
 import random
-import winsound
 import time
+
+
+#import guard winsound for non-Windows platforms
+try: 
+    import winsound
+    winsound_available = True
+except ImportError:
+    winsound_available = False
 
 #--------------------------
 #Serial import
@@ -154,12 +161,12 @@ def serial_thread():
                 if current_time - last_warning_beep >= warning_beep_interval:
                     last_warning_beep = current_time
 
-                    threading.Thread(
-                        target=winsound.Beep,
-                        args=(1000, 200),
-                        daemon=True
-                    ).start()
-
+                    if winsound_available:
+                        threading.Thread(
+                            target=winsound.Beep,
+                            args=(1000, 200),
+                            daemon=True
+                        ).start()
                 continue
         
 
