@@ -33,36 +33,48 @@ void setup() {
 
 
 void loop() {
-  //Wait until its this box's turn in the cycle
-  unsigned long cyclePosition = millis() % CYCLE_MS;
+  // One measurement + one send per cycle. Sending as fast as the loop can spin
+  // floods the Bluetooth TX buffer and never yields to the BT/idle tasks, which
+  // is what drops the link (and trips the task watchdog) seconds after connecting.
+  static unsigned long lastCycleSent = 0;
+  static bool haveSent = false;
+
+  unsigned long now = millis();
+  unsigned long cycle = now / CYCLE_MS;
+  unsigned long cyclePosition = now % CYCLE_MS;
   unsigned long slotStartTime = (BOX_ID - 1) * SLOT_DURATION_MS;
   unsigned long slotEndTime = slotStartTime + SLOT_DURATION_MS;
 
   bool isMySlot = (cyclePosition >= slotStartTime) && (cyclePosition < slotEndTime);
 
-  if (isMySlot) {
-    long d1 = readUltraSonicDistanceMm(trigPin1, echoPin1);
-    long d2 = readUltraSonicDistanceMm(trigPin2, echoPin2);
-
-    bool warning =
-    (d1 >= 0 && d1 <= WARNING_DISTANCE_MM) || (d2 >= 0 && d2 <= WARNING_DISTANCE_MM); 
-
-    if (warning) {
-      SerialBT.println(String(BOX_ID) + " WARNING");
-      Serial.println(String(BOX_ID) + " WARNING");
-    }
-
-    long combined = combineReadings(d1, d2);
-
-    if (combined >= 0) {
-      String message = String(BOX_ID) + " DIST " + String(combined) + "\n";
-      SerialBT.print(message);
-      Serial.print("Sent: " + message);
-    } else {
-      Serial.println(String(BOX_ID) + " DIST ERROR");
-    }
+  if (!isMySlot || (haveSent && cycle == lastCycleSent)) {
+    delay(1);  // yield: without this the BT stack starves and the link drops
+    return;
   }
 
+  lastCycleSent = cycle;
+  haveSent = true;
+
+  long d1 = readUltraSonicDistanceMm(trigPin1, echoPin1);
+  long d2 = readUltraSonicDistanceMm(trigPin2, echoPin2);
+
+  bool warning =
+    (d1 >= 0 && d1 <= WARNING_DISTANCE_MM) || (d2 >= 0 && d2 <= WARNING_DISTANCE_MM);
+
+  if (warning) {
+    SerialBT.println(String(BOX_ID) + " WARNING");
+    Serial.println(String(BOX_ID) + " WARNING");
+  }
+
+  long combined = combineReadings(d1, d2);
+
+  if (combined >= 0) {
+    String message = String(BOX_ID) + " DIST " + String(combined);
+    SerialBT.println(message);
+    Serial.println("Sent: " + message + "  (d1=" + String(d1) + " d2=" + String(d2) + ")");
+  } else {
+    Serial.println(String(BOX_ID) + " DIST ERROR d1=" + String(d1) + " d2=" + String(d2));
+  }
 }
 
 long combineReadings(long d1, long d2) {
