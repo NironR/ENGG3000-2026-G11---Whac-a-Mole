@@ -37,23 +37,18 @@ void loop() {
   // floods the Bluetooth TX buffer and never yields to the BT/idle tasks, which
   // is what drops the link (and trips the task watchdog) seconds after connecting.
   static unsigned long lastCycleSent = 0;
-  static bool haveSent = false;
 
   unsigned long now = millis();
   unsigned long cycle = now / CYCLE_MS;
   unsigned long cyclePosition = now % CYCLE_MS;
   unsigned long slotStartTime = (BOX_ID - 1) * SLOT_DURATION_MS;
-  unsigned long slotEndTime = slotStartTime + SLOT_DURATION_MS;
 
-  bool isMySlot = (cyclePosition >= slotStartTime) && (cyclePosition < slotEndTime);
-
-  if (!isMySlot || (haveSent && cycle == lastCycleSent)) {
+  if (cyclePosition < slotStartTime || cyclePosition >= slotStartTime + SLOT_DURATION_MS || cycle == lastCycleSent) {
     delay(1);  // yield: without this the BT stack starves and the link drops
     return;
   }
 
   lastCycleSent = cycle;
-  haveSent = true;
 
   long d1 = readUltraSonicDistanceMm(trigPin1, echoPin1);
   long d2 = readUltraSonicDistanceMm(trigPin2, echoPin2);
