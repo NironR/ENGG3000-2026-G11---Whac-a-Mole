@@ -26,9 +26,9 @@ except ImportError:
 
 root = tk.Tk()
 root.title("Whack-a-Mole")
-root.geometry("600x450")
+root.geometry("600x450") #Size is per pixel
 root.minsize(400,300)
-root.resizable(True, True)
+root.resizable(True, True)# Horizontal, Vertical
 
 
 # -------------------------
@@ -42,7 +42,13 @@ game_running = False
 # Timer IDs
 mole_timer = None
 next_mole_timer = None
+round_timer_id = None
 
+# -------------------------
+# Round Timer
+# -------------------------
+ROUND_DURATION = 60 #Timer in seconds
+time_remaining = ROUND_DURATION
 # -------------------------
 # Difficulty (combo-based)
 # -------------------------
@@ -50,8 +56,8 @@ next_mole_timer = None
 # waiting time between moles, and shrink the mole's visible size.
 difficulty_settings = {
     "Easy": {
-        "up_time": (900, 1200),   # Longer number will make mole stay up longer
-        "wait_time": (700, 1000), # How fast mole will appear
+        "up_time": (900, 1200),   # Minimum, Maximum, longer number will make mole stay up longer
+        "wait_time": (700, 1000), # randomly pick with minimum and maximum, lower wait time means mole disappear faster
         "mole_scale": 1.0         # Normal mole size
     },
     "Medium": {
@@ -94,7 +100,7 @@ ROOM_WIDTH_M = 1.5
 ROOM_HEIGHT_M = 1.4
 GRID_ROWS =  2
 GRID_COLS = 3
-WHACK_RADIUS_M = 0.1501
+WHACK_RADIUS_M = 0.1501 #Circumference around the mole
 cursor_x_m = 0.0
 cursor_y_m = 0.0
 
@@ -278,14 +284,52 @@ def start_game(difficulty):
     current_difficulty = difficulty
     score = 0
     combo = 0
-    game_running = True
+    game_running = False
 
     for widget in root.winfo_children():
         widget.destroy()
 
     create_game()
+    show_countdown(begin_round)
 
-
+# -------------------------
+# Countdown
+# -------------------------
+def show_countdown(on_complete):
+    overlay= tk.Label(
+        container,
+        text="",
+        font=("Arial", 48, "bold"),
+        fg= "white",
+        bg = "black"
+    )
+    overlay.place(relx=0.5, rely=0.5, anchor = "center")
+    sequence = [ "Ready", "Set", "Go!"]
+    def show_word(index):
+        # If the player escaped back to the menu mid-countdown, the overlay
+        # (and the whole game screen) has already been destroyed - bail out
+        # instead of trying to configure a widget that no longer exists.
+        if not overlay.winfo_exists():
+            return
+        if index >= len(sequence):
+            overlay.destroy()
+            on_complete()
+            return
+        overlay.config(text=sequence[index])
+        root.after(700, lambda:show_word(index +1))
+    show_word(0)
+                   
+                        
+# -------------------------
+# Begin Round (after the countdown)
+# -------------------------
+def begin_round():
+    global game_running, time_remaining
+    game_running = True
+    time_remaining = ROUND_DURATION
+    schedule_next_mole()
+    update_cursor_indicator()
+    tick_round_timer()
 # -------------------------
 # Create Game
 # -------------------------
@@ -294,6 +338,7 @@ def create_game():
 
     global container
     global score_label
+    global timer_label
     global coord_label
     global holes
 
@@ -303,6 +348,12 @@ def create_game():
         font=("Arial", 18, "bold")
     )
     score_label.pack(pady=5)
+    timer_label = tk.Label(
+        root,
+        text=f"Time: {ROUND_DURATION}s",
+        font=("arial", 14, "bold")
+    )
+    timer_label.pack(pady=2) #Adds 2 pixels between timer and score
 
     container = tk.Frame(root, bg="lightgreen")
     container.pack(fill=tk.BOTH, expand=True)
@@ -328,9 +379,6 @@ def create_game():
     )
     coord_label.place(relx=0.01, rely=0.98, anchor="sw")
 
-
-    # Start first mole
-    schedule_next_mole()
     update_cursor_indicator()
 
 # -------------------------
@@ -551,6 +599,74 @@ def update_cursor_indicator():
     if target_hole is not None:
         target_hole.config(highlightthickness=4, highlightbackground="red", highlightcolor="red")
 
+
+
+# -------------------------
+# Round Timer
+# -------------------------
+def tick_round_timer():
+    global round_timer_id, time_remaining
+    if not game_running:
+        return
+    timer_label.config(text=f"Time: {time_remaining}s")
+    if time_remaining <= 0:
+        end_round()
+        return
+    time_remaining -= 1
+    round_timer_id = root.after(1000, tick_round_timer)
+    
+def end_round():
+    global game_running
+    global mole
+    global mole_timer
+    global next_mole_timer
+    global round_timer_id
+    game_running = False
+    if mole_timer is not None:
+        root.after_cancel(mole_timer)
+        mole_timer = None
+    if next_mole_timer is not None:
+        root.after_cancel(next_mole_timer)
+        next_mole_timer = None
+    if round_timer_id is not None:
+        root.after_cancel(round_timer_id)
+        round_timer_id = None
+    if mole is not None:
+        mole.config(bg ="black")
+        mole = None
+    show_game_over()
+
+# -------------------------
+# Game Over
+# -------------------------
+def show_game_over():
+    for widget in root.winfo_children():
+        widget.destroy()
+        
+    tk.Label(
+        root,
+        text="GAME OVER",
+        font=("Arial", 32, "bold")
+    ).pack(pady=30)
+    tk.Label(
+        root,
+        text=f"Final Score: {score}",
+        font=("Arial", 20)
+    ).pack(pady=10)
+    tk.Button(
+        root,
+        text="Play Again",
+        font=("Arial", 16),
+        width=15,
+        command=lambda:start_game(current_difficulty)
+    ).pack(pady=10)
+    tk.Button(
+        root,
+        text="Main Menu",
+        font=("Arial", 14),
+        width=15,
+        command=start_menu
+        ).pack(pady=5)
 def update_coord_display():
     if game_running:
         grid_row, grid_col = get_hole_grid_cell(cursor_x_m, cursor_y_m)
@@ -558,7 +674,6 @@ def update_coord_display():
             text=f"x={cursor_x_m:.2f}m y={cursor_y_m:.2f}m (grid: {grid_row},{grid_col})"
         )
     root.after(50, update_coord_display)
-
 # -------------------------
 # Fullscreen Toggle
 # -------------------------
@@ -574,6 +689,7 @@ def return_to_menu(event=None):
     global mole
     global mole_timer
     global next_mole_timer
+    global round_timer_id
     # Stop the game
     game_running = False
 
@@ -585,6 +701,10 @@ def return_to_menu(event=None):
     if next_mole_timer is not None:
         root.after_cancel(next_mole_timer)
         next_mole_timer = None
+        
+    if round_timer_id is not None:
+        root.after_cancel(round_timer_id)
+        round_timer_id = None
 
     # Remove the current mole
     if mole is not None:
@@ -605,5 +725,4 @@ root.bind("<F11>", toggle_fullscreen)
 
 root.after(50, poll_sensor)
 root.after(20, poll_mouse)
-
 root.mainloop()
