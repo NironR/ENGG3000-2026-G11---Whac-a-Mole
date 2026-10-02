@@ -722,6 +722,7 @@ bt_thread.start()
 start_menu()
 root.bind("<Escape>", return_to_menu)
 root.bind("<F11>", toggle_fullscreen)
+
 root.after(50, poll_sensor)
 root.after(20, poll_mouse)
 root.mainloop()
