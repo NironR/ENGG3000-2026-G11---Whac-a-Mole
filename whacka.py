@@ -328,7 +328,6 @@ def create_game():
     )
     coord_label.place(relx=0.01, rely=0.98, anchor="sw")
 
-    container.bind("<Motion>", track_cursor)
 
     # Start first mole
     schedule_next_mole()
@@ -337,13 +336,52 @@ def create_game():
 # -------------------------
 #Tracking Cursor
 # -------------------------
-def track_cursor(event):
+def poll_mouse():
     global cursor_x_m, cursor_y_m
-    cursor_x_m, cursor_y_m = pixel_to_metres(event.x, event.y)
-    coord_label.config(text=f"x={cursor_x_m:.2f}m y={cursor_y_m:.2f}m")
-    update_cursor_indicator()
-    check_whack()
-    print(f"cursor px=({event.x}, {event.y})  m=({cursor_x_m:.2f}, {cursor_y_m:.2f})")
+
+    if game_running:
+
+        # Get mouse position on the whole screen
+        mouse_x = root.winfo_pointerx()
+        mouse_y = root.winfo_pointery()
+
+        # Get the gameplay area's position on the whole screen
+        container_x = container.winfo_rootx()
+        container_y = container.winfo_rooty()
+
+        # Convert the mouse position into coordinates
+        # relative to the gameplay area
+        px = mouse_x - container_x
+        py = mouse_y - container_y
+
+        width = container.winfo_width()
+        height = container.winfo_height()
+
+        # Only track the mouse while it is inside
+        # the gameplay area
+        if 0 <= px <= width and 0 <= py <= height:
+
+            # Convert pixels into the 1.5m x 1.4m
+            # physical play-space coordinates
+            cursor_x_m, cursor_y_m = pixel_to_metres(px, py)
+
+            coord_label.config(
+                text=f"x={cursor_x_m:.2f}m y={cursor_y_m:.2f}m"
+            )
+
+            print(
+                f"cursor px=({px}, {py})  "
+                f"m=({cursor_x_m:.2f}, {cursor_y_m:.2f})"
+            )
+
+            update_cursor_indicator()
+
+            # Check whether the current position
+            # is close enough to the active mole
+            check_whack()
+
+    # Check mouse position again in 20 ms
+    root.after(20, poll_mouse)
 # -------------------------
 # Schedule Next Mole
 # -------------------------
@@ -564,5 +602,8 @@ bt_thread.start()
 start_menu()
 root.bind("<Escape>", return_to_menu)
 root.bind("<F11>", toggle_fullscreen)
+
 root.after(50, poll_sensor)
+root.after(20, poll_mouse)
+
 root.mainloop()
