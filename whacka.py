@@ -128,6 +128,46 @@ def widget_pixel_center(widget):
         widget.winfo_y() + widget.winfo_height() / 2
     )
 
+def get_hole_bounds(hole, pad):
+    width = max(container.winfo_width(), 1)
+    height = max(container.winfo_height(), 1)
+
+    cell_width = width / GRID_COLS
+    cell_height = height / GRID_ROWS
+
+    x1 = hole["col"] * cell_width + pad
+    y1 = hole["row"] * cell_height + pad
+    x2 = (hole["col"] + 1) * cell_width - pad
+    y2 = (hole["row"] + 1) * cell_height - pad
+
+    return x1, y1, x2, y2
+
+
+def draw_hole(hole):
+    if hole["canvas_id"] is None:
+        return
+
+    if hole is mole:
+        mole_scale = difficulty_settings[current_difficulty]["mole_scale"]
+        pad = int(DEFAULT_HOLE_PAD / mole_scale)
+        colour = "brown"
+    else:
+        pad = DEFAULT_HOLE_PAD
+        colour = "black"
+
+    x1, y1, x2, y2 = get_hole_bounds(hole, pad)
+
+    container.coords(hole["canvas_id"], x1, y1, x2, y2)
+    container.itemconfig(hole["canvas_id"], fill=colour)
+
+
+def redraw_playfield(event=None):
+    for hole in holes:
+        draw_hole(hole)
+
+    if game_running:
+        update_cursor_indicator()
+
 # --------------------------
 # Serial Communication (Bluetooth)
 #-------------------------
@@ -355,20 +395,31 @@ def create_game():
     )
     timer_label.pack(pady=2) #Adds 2 pixels between timer and score
 
-    container = tk.Frame(root, bg="lightgreen")
+    container = tk.Canvas(root, bg="lightgreen", highlightthickness=0)
     container.pack(fill=tk.BOTH, expand=True)
-
-    for c in range(GRID_COLS):
-        container.grid_columnconfigure(c, weight=1, uniform="col")
-    for r in range(GRID_ROWS):
-        container.grid_rowconfigure(r, weight=1, uniform="row")
 
     holes = []
     for r in range(GRID_ROWS):
         for c in range(GRID_COLS):
-            hole = tk.Label(container, bg="black", highlightthickness=0)
-            hole.grid(row=r, column=c, sticky="nsew", padx=DEFAULT_HOLE_PAD, pady=DEFAULT_HOLE_PAD)
-            holes.append(hole)
+            hole_x_m = (c + 0.5) * (ROOM_WIDTH_M / GRID_COLS)
+            hole_y_m = (r + 0.5) * (ROOM_HEIGHT_M / GRID_ROWS)
+
+            canvas_id = container.create_rectangle(
+                0,
+                0,
+                0,
+                0,
+                fill="black",
+                outline=""
+            )
+
+            holes.append({
+                "row": r,
+                "col": c,
+                "x_m": hole_x_m,
+                "y_m": hole_y_m,
+                "canvas_id": canvas_id
+            })
 
     coord_label = tk.Label(
         container,
@@ -378,6 +429,9 @@ def create_game():
         font=("Arial", 12, "bold")
     )
     coord_label.place(relx=0.01, rely=0.98, anchor="sw")
+
+    container.bind("<Configure>", redraw_playfield)
+    root.after(0, redraw_playfield)
 
     update_cursor_indicator()
 
@@ -471,14 +525,7 @@ def show_mole():
         return
     # Pick random hole
     mole = random.choice(holes)
-    mole.config(bg="brown")
-
-    # Shrink the mole's visible area for higher difficulties -- there's no
-    # oval radius to resize without Canvas, so padding stands in for it:
-    # more padding around the widget means less of the cell is filled.
-    mole_scale = difficulty_settings[current_difficulty]["mole_scale"]
-    scaled_pad = int(DEFAULT_HOLE_PAD / mole_scale)
-    mole.grid_configure(padx=scaled_pad, pady=scaled_pad)
+    draw_hole(mole)
 
     # Decide how long mole stays up
     min_time, max_time = difficulty_settings[current_difficulty]["up_time"]
@@ -519,9 +566,9 @@ def hide_mole():
             text=f"Score: {score} | Combo: {combo} | Level: {current_difficulty}"
         )
 
-        mole.grid_configure(padx=DEFAULT_HOLE_PAD, pady=DEFAULT_HOLE_PAD)
-        mole.config(bg="black")
+        old_mole = mole
         mole = None
+        draw_hole(old_mole)
 
     mole_timer = None
 
@@ -544,8 +591,8 @@ def check_whack():
     if mole is None:
         return
 
-    mole_x, mole_y = widget_pixel_center(mole)
-    mole_x_m, mole_y_m = pixel_to_metres(mole_x,mole_y)
+    mole_x_m = mole["x_m"]
+    mole_y_m = mole["y_m"]
     dx = cursor_x_m - mole_x_m
     dy = cursor_y_m - mole_y_m
     distance_m = (dx*dx+dy*dy)**0.5
@@ -576,9 +623,9 @@ def check_whack():
             mole_timer = None
 
         # Make mole go down immediately
-        mole.grid_configure(padx=DEFAULT_HOLE_PAD, pady=DEFAULT_HOLE_PAD)
-        mole.config(bg="black")
+        old_mole = mole
         mole = None
+        draw_hole(old_mole)
 
         # Schedule ONE new mole
         schedule_next_mole()
@@ -587,18 +634,24 @@ def update_cursor_indicator():
     if not holes or not game_running:
         return
 
-    cursor_cell = get_grid_cell(cursor_x_m, cursor_y_m)
-    target_hole = next(
-        (hole for hole in holes if get_hole_grid_cell(*widget_pixel_center(hole)) == cursor_cell),
-        None
-    )
+    cursor_row, cursor_col = get_grid_cell(cursor_x_m, cursor_y_m)
 
     for hole in holes:
-        hole.config(highlightthickness=0)
-
-    if target_hole is not None:
-        target_hole.config(highlightthickness=4, highlightbackground="red", highlightcolor="red")
-
+        if (
+            hole["row"] == cursor_row
+            and hole["col"] == cursor_col
+        ):
+            container.itemconfig(
+                hole["canvas_id"],
+                outline="red",
+                width=4
+            )
+        else:
+            container.itemconfig(
+                hole["canvas_id"],
+                outline="",
+                width=0
+            )
 
 
 # -------------------------
@@ -632,8 +685,9 @@ def end_round():
         root.after_cancel(round_timer_id)
         round_timer_id = None
     if mole is not None:
-        mole.config(bg ="black")
+        old_mole = mole
         mole = None
+        draw_hole(old_mole)
     show_game_over()
 
 # -------------------------
@@ -708,8 +762,9 @@ def return_to_menu(event=None):
 
     # Remove the current mole
     if mole is not None:
-        mole.config(bg="black")
+        old_mole = mole
         mole = None
+        draw_hole(old_mole)
 
     # Return to start menu
     start_menu()
