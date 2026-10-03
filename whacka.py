@@ -59,17 +59,15 @@ difficulty_settings = {
     "Easy": {
         "up_time": (900, 1200),   # Minimum, Maximum, longer number will make mole stay up longer
         "wait_time": (700, 1000), # randomly pick with minimum and maximum, lower wait time means mole disappear faster
-        "mole_scale": 1.0         # Normal mole size
+
     },
     "Medium": {
         "up_time": (600, 900),
         "wait_time": (450, 700),
-        "mole_scale": 0.8         # Mole is reduced to 80% of normal size
     },
     "Hard": {
         "up_time": (350, 600),
         "wait_time": (250, 450),
-        "mole_scale": 0.6         # Mole is reduced to 60% of normal size
     },
 }
 
@@ -117,6 +115,10 @@ PLAYFIELD_BACK_LEFT = (0.228, 0.504)
 PLAYFIELD_BACK_RIGHT = (0.775, 0.504)
 PLAYFIELD_FRONT_LEFT = (0.130, 0.675)
 PLAYFIELD_FRONT_RIGHT = (0.871, 0.675)
+
+mole_image_source = None
+mole_image_photo = None
+mole_image_id = None
 
 def pixel_to_metres (px,py):
     width = max (container.winfo_width(), 1)
@@ -167,17 +169,83 @@ def draw_hole(hole):
     if hole["canvas_id"] is None:
         return
 
-    if hole is mole:
-        scale = difficulty_settings[current_difficulty]["mole_scale"]
-        colour = "brown"
-    else:
-        scale = 1.0
-        colour = "black"
+    x1, y1, x2, y2 = get_hole_bounds(hole, 1.0)
 
-    x1, y1, x2, y2 = get_hole_bounds(hole, scale)
+    container.coords(
+        hole["canvas_id"],
+        x1,
+        y1,
+        x2,
+        y2
+    )
 
-    container.coords(hole["canvas_id"], x1, y1, x2, y2)
-    container.itemconfig(hole["canvas_id"], fill=colour)
+    container.itemconfig(
+        hole["canvas_id"],
+        fill=""
+    )
+
+def draw_mole_sprite():
+    global mole_image_photo
+
+    if mole_image_id is None:
+        return
+
+    if mole is None:
+        container.itemconfig(
+            mole_image_id,
+            state="hidden"
+        )
+        return
+
+    x1, y1, x2, y2 = get_hole_bounds(
+    mole,
+    1.0
+)
+
+    hole_width = x2 - x1
+    hole_height = y2 - y1
+
+    target_width = max(
+        1,
+        int(hole_width * 0.9)
+    )
+
+    source_width, source_height = mole_image_source.size
+
+    target_height = max(
+        1,
+        int(
+            target_width *
+            source_height /
+            source_width
+        )
+    )
+
+    resized_image = mole_image_source.resize(
+        (target_width, target_height),
+        Image.Resampling.LANCZOS
+    )
+
+    mole_image_photo = ImageTk.PhotoImage(resized_image)
+
+    centre_x = (x1 + x2) / 2
+
+    mole_bottom_y = (
+        (y1 + y2) / 2 +
+        hole_height * 0.25
+    )
+
+    container.coords(
+        mole_image_id,
+        centre_x,
+        mole_bottom_y
+    )
+
+    container.itemconfig(
+        mole_image_id,
+        image=mole_image_photo,
+        state="normal"
+    )
 
 def get_arcade_image_geometry():
     width = max(container.winfo_width(), 1)
@@ -317,6 +385,8 @@ def redraw_playfield(event=None):
 
     for hole in holes:
         draw_hole(hole)
+
+    draw_mole_sprite()
 
     if game_running:
         update_cursor_indicator()
@@ -537,6 +607,9 @@ def create_game():
     global arcade_background_source
     global arcade_background_photo
     global arcade_background_id
+    global mole_image_source
+    global mole_image_photo
+    global mole_image_id
 
     score_label = tk.Label(
         root,
@@ -565,6 +638,19 @@ def create_game():
     0,
     anchor="center"
 )
+
+    mole_image_source = Image.open(
+        "Assets/Idle mole.png"
+    ).convert("RGBA")
+
+    mole_image_photo = None
+
+    mole_image_id = container.create_image(
+        0,
+        0,
+        anchor="s",
+        state="hidden"
+    )
 
     holes = []
     for r in range(GRID_ROWS):
@@ -692,7 +778,7 @@ def show_mole():
         return
     # Pick random hole
     mole = random.choice(holes)
-    draw_hole(mole)
+    draw_mole_sprite()
 
     # Decide how long mole stays up
     min_time, max_time = difficulty_settings[current_difficulty]["up_time"]
@@ -735,7 +821,7 @@ def hide_mole():
 
         old_mole = mole
         mole = None
-        draw_hole(old_mole)
+        draw_mole_sprite()
 
     mole_timer = None
 
@@ -792,7 +878,7 @@ def check_whack():
         # Make mole go down immediately
         old_mole = mole
         mole = None
-        draw_hole(old_mole)
+        draw_mole_sprite()
 
         # Schedule ONE new mole
         schedule_next_mole()
@@ -854,7 +940,7 @@ def end_round():
     if mole is not None:
         old_mole = mole
         mole = None
-        draw_hole(old_mole)
+        draw_mole_sprite()
     show_game_over()
 
 # -------------------------
@@ -931,7 +1017,7 @@ def return_to_menu(event=None):
     if mole is not None:
         old_mole = mole
         mole = None
-        draw_hole(old_mole)
+        draw_mole_sprite()
 
     # Return to start menu
     start_menu()
