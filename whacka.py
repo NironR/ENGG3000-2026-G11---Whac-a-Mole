@@ -230,6 +230,57 @@ def metres_to_canvas(x_m, y_m):
 
     return canvas_x, canvas_y
 
+def canvas_to_metres(px, py):
+    image_x, image_y, image_width, image_height = get_arcade_image_geometry()
+
+    image_fraction_x = (px - image_x) / image_width
+    image_fraction_y = (py - image_y) / image_height
+
+    back_left_x, back_y = PLAYFIELD_BACK_LEFT
+    back_right_x, _ = PLAYFIELD_BACK_RIGHT
+    front_left_x, front_y = PLAYFIELD_FRONT_LEFT
+    front_right_x, _ = PLAYFIELD_FRONT_RIGHT
+
+    playfield_height = front_y - back_y
+
+    if playfield_height == 0:
+        return None
+
+    y_fraction = (
+        image_fraction_y - back_y
+    ) / playfield_height
+
+    # Mouse is above or below the physical playfield
+    if not 0.0 <= y_fraction <= 1.0:
+        return None
+
+    left_x = back_left_x + (
+        front_left_x - back_left_x
+    ) * y_fraction
+
+    right_x = back_right_x + (
+        front_right_x - back_right_x
+    ) * y_fraction
+
+    # Mouse is outside the left/right edges of the
+    # perspective playfield
+    if not left_x <= image_fraction_x <= right_x:
+        return None
+
+    playfield_width = right_x - left_x
+
+    if playfield_width == 0:
+        return None
+
+    x_fraction = (
+        image_fraction_x - left_x
+    ) / playfield_width
+
+    x_m = x_fraction * ROOM_WIDTH_M
+    y_m = y_fraction * ROOM_HEIGHT_M
+
+    return x_m, y_m
+
 def draw_arcade_background():
     global arcade_background_photo
 
@@ -580,23 +631,22 @@ def poll_mouse():
         # the gameplay area
         if 0 <= px <= width and 0 <= py <= height:
 
-            # Convert pixels into the 1.5m x 1.4m
-            # physical play-space coordinates
-            cursor_x_m, cursor_y_m = pixel_to_metres(px, py)
+            physical_position = canvas_to_metres(px, py)
 
-            coord_label.config(
-                text=f"x={cursor_x_m:.2f}m y={cursor_y_m:.2f}m"
+            if physical_position is not None:
+
+                cursor_x_m, cursor_y_m = physical_position
+
+                coord_label.config(
+                    text=f"x={cursor_x_m:.2f}m y={cursor_y_m:.2f}m"
             )
 
-            print(
-                f"cursor px=({px}, {py})  "
-                f"m=({cursor_x_m:.2f}, {cursor_y_m:.2f})"
+                print(
+                    f"cursor px=({px}, {py})  "
+                    f"m=({cursor_x_m:.2f}, {cursor_y_m:.2f})"
             )
 
             update_cursor_indicator()
-
-            # Check whether the current position
-            # is close enough to the active mole
             check_whack()
 
     # Check mouse position again in 20 ms
