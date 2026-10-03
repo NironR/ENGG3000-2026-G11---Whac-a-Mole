@@ -111,6 +111,12 @@ DEFAULT_HOLE_PAD = 20  # grid padding at mole_scale == 1.0
 arcade_background_source = None
 arcade_background_photo = None
 arcade_background_id = None
+# Playfield corners as fractions of the arcade cabinet image.
+# These define the perspective trapezoid containing the six holes.
+PLAYFIELD_BACK_LEFT = (0.228, 0.504)
+PLAYFIELD_BACK_RIGHT = (0.775, 0.504)
+PLAYFIELD_FRONT_LEFT = (0.130, 0.675)
+PLAYFIELD_FRONT_RIGHT = (0.871, 0.675)
 
 def pixel_to_metres (px,py):
     width = max (container.winfo_width(), 1)
@@ -133,17 +139,26 @@ def widget_pixel_center(widget):
         widget.winfo_y() + widget.winfo_height() / 2
     )
 
-def get_hole_bounds(hole, pad):
-    width = max(container.winfo_width(), 1)
-    height = max(container.winfo_height(), 1)
+def get_hole_bounds(hole, scale):
+    centre_x, centre_y = metres_to_canvas(
+        hole["x_m"],
+        hole["y_m"]
+    )
 
-    cell_width = width / GRID_COLS
-    cell_height = height / GRID_ROWS
+    _, _, image_width, image_height = get_arcade_image_geometry()
 
-    x1 = hole["col"] * cell_width + pad
-    y1 = hole["row"] * cell_height + pad
-    x2 = (hole["col"] + 1) * cell_width - pad
-    y2 = (hole["row"] + 1) * cell_height - pad
+    depth_fraction = hole["y_m"] / ROOM_HEIGHT_M
+
+    hole_width_fraction = 0.154 + (0.208 - 0.154) * depth_fraction
+    hole_height_fraction = 0.057 + (0.091 - 0.057) * depth_fraction
+
+    hole_width = image_width * hole_width_fraction * scale
+    hole_height = image_height * hole_height_fraction * scale
+
+    x1 = centre_x - hole_width / 2
+    y1 = centre_y - hole_height / 2
+    x2 = centre_x + hole_width / 2
+    y2 = centre_y + hole_height / 2
 
     return x1, y1, x2, y2
 
@@ -153,24 +168,18 @@ def draw_hole(hole):
         return
 
     if hole is mole:
-        mole_scale = difficulty_settings[current_difficulty]["mole_scale"]
-        pad = int(DEFAULT_HOLE_PAD / mole_scale)
+        scale = difficulty_settings[current_difficulty]["mole_scale"]
         colour = "brown"
     else:
-        pad = DEFAULT_HOLE_PAD
+        scale = 1.0
         colour = "black"
 
-    x1, y1, x2, y2 = get_hole_bounds(hole, pad)
+    x1, y1, x2, y2 = get_hole_bounds(hole, scale)
 
     container.coords(hole["canvas_id"], x1, y1, x2, y2)
     container.itemconfig(hole["canvas_id"], fill=colour)
 
-def draw_arcade_background():
-    global arcade_background_photo
-
-    if arcade_background_source is None or arcade_background_id is None:
-        return
-
+def get_arcade_image_geometry():
     width = max(container.winfo_width(), 1)
     height = max(container.winfo_height(), 1)
 
@@ -181,8 +190,56 @@ def draw_arcade_background():
         height / source_height
     )
 
-    new_width = max(1, int(source_width * scale))
-    new_height = max(1, int(source_height * scale))
+    image_width = max(1, int(source_width * scale))
+    image_height = max(1, int(source_height * scale))
+
+    image_x = (width - image_width) / 2
+    image_y = (height - image_height) / 2
+
+    return image_x, image_y, image_width, image_height
+
+def metres_to_canvas(x_m, y_m):
+    image_x, image_y, image_width, image_height = get_arcade_image_geometry()
+
+    x_fraction = x_m / ROOM_WIDTH_M
+    y_fraction = y_m / ROOM_HEIGHT_M
+
+    back_left_x, back_y = PLAYFIELD_BACK_LEFT
+    back_right_x, _ = PLAYFIELD_BACK_RIGHT
+    front_left_x, front_y = PLAYFIELD_FRONT_LEFT
+    front_right_x, _ = PLAYFIELD_FRONT_RIGHT
+
+    left_x = back_left_x + (
+        front_left_x - back_left_x
+    ) * y_fraction
+
+    right_x = back_right_x + (
+        front_right_x - back_right_x
+    ) * y_fraction
+
+    image_fraction_x = left_x + (
+        right_x - left_x
+    ) * x_fraction
+
+    image_fraction_y = back_y + (
+        front_y - back_y
+    ) * y_fraction
+
+    canvas_x = image_x + image_fraction_x * image_width
+    canvas_y = image_y + image_fraction_y * image_height
+
+    return canvas_x, canvas_y
+
+def draw_arcade_background():
+    global arcade_background_photo
+
+    if arcade_background_source is None or arcade_background_id is None:
+        return
+
+    width = max(container.winfo_width(), 1)
+    height = max(container.winfo_height(), 1)
+
+    _, _, new_width, new_height = get_arcade_image_geometry()
 
     resized_image = arcade_background_source.resize(
         (new_width, new_height),
