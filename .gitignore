@@ -10,3 +10,6 @@ __pycache__/
 .venv/
 venv/
 Whack-a-Mole.spec
+
+# Local dev launcher
+run.bat
