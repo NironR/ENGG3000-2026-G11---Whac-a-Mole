@@ -2,6 +2,7 @@ import threading
 import tkinter as tk
 import random
 import time
+from PIL import Image, ImageTk
 
 
 #import guard winsound for non-Windows platforms
@@ -107,6 +108,10 @@ cursor_y_m = 0.0
 holes = []  # hole Label widgets, in the same 2x3 order HOLE_LAYOUT_FRACTIONS used to define
 DEFAULT_HOLE_PAD = 20  # grid padding at mole_scale == 1.0
 
+arcade_background_source = None
+arcade_background_photo = None
+arcade_background_id = None
+
 def pixel_to_metres (px,py):
     width = max (container.winfo_width(), 1)
     height = max(container.winfo_height(),1)
@@ -160,8 +165,48 @@ def draw_hole(hole):
     container.coords(hole["canvas_id"], x1, y1, x2, y2)
     container.itemconfig(hole["canvas_id"], fill=colour)
 
+def draw_arcade_background():
+    global arcade_background_photo
+
+    if arcade_background_source is None or arcade_background_id is None:
+        return
+
+    width = max(container.winfo_width(), 1)
+    height = max(container.winfo_height(), 1)
+
+    source_width, source_height = arcade_background_source.size
+
+    scale = min(
+        width / source_width,
+        height / source_height
+    )
+
+    new_width = max(1, int(source_width * scale))
+    new_height = max(1, int(source_height * scale))
+
+    resized_image = arcade_background_source.resize(
+        (new_width, new_height),
+        Image.Resampling.LANCZOS
+    )
+
+    arcade_background_photo = ImageTk.PhotoImage(resized_image)
+
+    container.coords(
+        arcade_background_id,
+        width / 2,
+        height / 2
+    )
+
+    container.itemconfig(
+        arcade_background_id,
+        image=arcade_background_photo
+    )
+
+    container.tag_lower(arcade_background_id)
 
 def redraw_playfield(event=None):
+    draw_arcade_background()
+
     for hole in holes:
         draw_hole(hole)
 
@@ -381,6 +426,9 @@ def create_game():
     global timer_label
     global coord_label
     global holes
+    global arcade_background_source
+    global arcade_background_photo
+    global arcade_background_id
 
     score_label = tk.Label(
         root,
@@ -397,6 +445,18 @@ def create_game():
 
     container = tk.Canvas(root, bg="lightgreen", highlightthickness=0)
     container.pack(fill=tk.BOTH, expand=True)
+
+    arcade_background_source = Image.open(
+        "Assets/Arcade Machine.png"
+    ).convert("RGBA")
+
+    arcade_background_photo = None
+
+    arcade_background_id = container.create_image(
+    0,
+    0,
+    anchor="center"
+)
 
     holes = []
     for r in range(GRID_ROWS):
