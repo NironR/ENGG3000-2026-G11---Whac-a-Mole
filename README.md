@@ -55,10 +55,10 @@ Whack-a-Mole.exe
 - `sensor.ino`, ESP32 firmware. Each box has two RCWL-1601 ultrasonic
   sensors, polled on request over Bluetooth SPP (`ENGG3000_<BOX_ID>`).
   The PC asks one box at a time, so only one sensor is ever listening.
-- `whacka.py`, the game. Polls each paired box in turn, picks the
+- `whacka.py` — the game. Polls each paired box in turn, picks the
   column from whichever box sees the player, and maps that box's
   distance reading to depth in the grid.
-- `bt_test.py`, bench tool for testing one box over Bluetooth without
+- `bt_test.py` — bench tool for testing one box over Bluetooth without
   launching the game.
 
 ![Architectural Design](Assets/whack-a-mole-runtime.png)
