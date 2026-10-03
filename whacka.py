@@ -147,7 +147,9 @@ baud_rate = 115200
 poll_timeout_s = 0.1   # a box answers well inside this; a missing one costs this much
 port_retry_s = 3.0     # don't stall the sweep retrying a box that isn't plugged in
 
-WARNING_DISTANCE_MM = 500    # brief: audible alarm within 50cm of the screen
+DEAD_ZONE_MM = 600           # spec v2.1: alarm when within 60cm of the screen
+BOX_WALL_OFFSET_MM = 0       # how far the boxes sit out from the screen wall - measure and set
+WARNING_DISTANCE_MM = DEAD_ZONE_MM - BOX_WALL_OFFSET_MM  # the same limit, as the boxes see it
 warning_beep_interval = 0.5  # seconds, stops the beep machine-gunning
 COLUMN_STICKINESS_MM = 150   # another box must be this much closer to steal the column
 
@@ -160,6 +162,7 @@ latest_by_box = {}       # BOX_ID -> distance in mm, or None when that box sees 
 distance_lock = threading.Lock()
 active_box_id = None     # which box currently owns the cursor
 last_warning_beep = 0.00
+warning_label = None
 
 
 def read_reading(ser, box_id):
@@ -243,27 +246,44 @@ assert pick_box({1: 900, 2: 700}, 1) == 2      # 200mm closer is
 assert pick_box({1: 900, 2: 800}, 3) == 2      # owner dropped out: nearest wins
 
 
-def nearest_box():
-    """The box seeing the player, and its distance."""
-    with distance_lock:
-        seen = {box_id: d for box_id, d in latest_by_box.items() if d is not None}
-
-    box_id = pick_box(seen, active_box_id)
-    return (box_id, seen[box_id]) if box_id is not None else (None, None)
+def in_dead_zone(seen):
+    """Any box sees someone in the dead zone - not just the box owning the cursor,
+    which stickiness can leave on a box further away than the closest one."""
+    return any(d <= WARNING_DISTANCE_MM for d in seen.values())
 
 
-def sound_proximity_alarm(distance_mm):
-    global last_warning_beep
+assert not in_dead_zone({})
+assert not in_dead_zone({1: 900, 2: WARNING_DISTANCE_MM + 1})
+assert in_dead_zone({1: 900, 2: WARNING_DISTANCE_MM - 50})   # box 2 alone is enough
 
-    if distance_mm > WARNING_DISTANCE_MM:
+
+def proximity_alarm(too_close):
+    """Beep and cover the screen with a warning while someone is in the dead zone."""
+    global last_warning_beep, warning_label
+
+    if not too_close:
+        if warning_label is not None and warning_label.winfo_exists():
+            warning_label.place_forget()
         return
+
+    # Every screen change destroys root's children, so the banner may be gone.
+    if warning_label is None or not warning_label.winfo_exists():
+        warning_label = tk.Label(
+            root,
+            text="TOO CLOSE!\nSTEP BACK",
+            font=("Arial", 40, "bold"),
+            fg="white",
+            bg="red"
+        )
+    warning_label.place(relx=0.5, rely=0.5, anchor="center", relwidth=1.0, relheight=0.5)
+    warning_label.lift()
 
     current_time = time.monotonic()
     if current_time - last_warning_beep < warning_beep_interval:
         return
     last_warning_beep = current_time
 
-    print("WARNING: Player is within 50cm of sensor")
+    print("WARNING: Player is within 60cm of the screen")
     if winsound_available:
         threading.Thread(target=winsound.Beep, args=(1000, 200), daemon=True).start()
 
@@ -271,13 +291,15 @@ def sound_proximity_alarm(distance_mm):
 def poll_sensor():
     global cursor_x_m, cursor_y_m, active_box_id
 
-    box_id, distance = nearest_box()
+    with distance_lock:
+        seen = {box_id: d for box_id, d in latest_by_box.items() if d is not None}
 
-    if box_id is not None:
-        # Alarm is a safety feature - it fires whether or not a game is running.
-        sound_proximity_alarm(distance)
+    # Alarm is a safety feature - it fires whether or not a game is running.
+    proximity_alarm(in_dead_zone(seen))
 
+    box_id = pick_box(seen, active_box_id)
     if box_id is not None and game_running:
+        distance = seen[box_id]
         active_box_id = box_id
         # BOX_ID is the column: which box sees you is your left/centre/right cell,
         # and that box's distance is how far down the grid you are.
