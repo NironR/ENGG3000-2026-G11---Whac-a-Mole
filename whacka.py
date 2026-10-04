@@ -99,7 +99,7 @@ ROOM_WIDTH_M = 1.5
 ROOM_HEIGHT_M = 1.4
 GRID_ROWS =  2
 GRID_COLS = 3
-WHACK_RADIUS_M = 0.1501 #Circumference around the mole
+WHACK_RADIUS_M = 0.20 #Radius around the mole for a successful hit
 cursor_x_m = 0.0
 cursor_y_m = 0.0
 
@@ -119,6 +119,18 @@ PLAYFIELD_FRONT_RIGHT = (0.871, 0.675)
 mole_image_source = None
 mole_image_photo = None
 mole_image_id = None
+
+hammer_image_source = None
+hammer_image_photo = None
+hammer_image_id = None
+hammer_image_size = None
+
+HAMMER_WIDTH_FRACTION = 0.22
+
+# Position of the striking head within Hammer.png.
+# Fine-tune after visually testing the sprite.
+HAMMER_STRIKE_X_FRACTION = 0.39
+HAMMER_STRIKE_Y_FRACTION = 0.28
 
 def pixel_to_metres (px,py):
     width = max (container.winfo_width(), 1)
@@ -246,6 +258,86 @@ def draw_mole_sprite():
         image=mole_image_photo,
         state="normal"
     )
+
+def draw_hammer_sprite():
+    global hammer_image_photo
+    global hammer_image_size
+
+    if hammer_image_id is None:
+        return
+
+    if not game_running:
+        container.itemconfig(
+            hammer_image_id,
+            state="hidden"
+        )
+        return
+
+    hammer_x, hammer_y = metres_to_canvas(
+        cursor_x_m,
+        cursor_y_m
+    )
+
+    _, _, image_width, _ = get_arcade_image_geometry()
+
+    target_width = max(
+        1,
+        int(image_width * HAMMER_WIDTH_FRACTION)
+    )
+
+    source_width, source_height = hammer_image_source.size
+
+    target_height = max(
+        1,
+        int(
+            target_width *
+            source_height /
+            source_width
+        )
+    )
+
+    target_size = (target_width, target_height)
+
+    # Only resize the hammer when its required display size changes.
+    if hammer_image_size != target_size:
+        resized_image = hammer_image_source.resize(
+            target_size,
+            Image.Resampling.LANCZOS
+        )
+
+        hammer_image_photo = ImageTk.PhotoImage(
+            resized_image
+        )
+
+        hammer_image_size = target_size
+
+        container.itemconfig(
+            hammer_image_id,
+            image=hammer_image_photo
+        )
+
+    draw_x = (
+        hammer_x -
+        target_width * HAMMER_STRIKE_X_FRACTION
+    )
+
+    draw_y = (
+        hammer_y -
+        target_height * HAMMER_STRIKE_Y_FRACTION
+    )
+
+    container.coords(
+        hammer_image_id,
+        draw_x,
+        draw_y
+    )
+
+    container.itemconfig(
+        hammer_image_id,
+        state="normal"
+    )
+
+    container.tag_raise(hammer_image_id)
 
 def get_arcade_image_geometry():
     width = max(container.winfo_width(), 1)
@@ -387,6 +479,7 @@ def redraw_playfield(event=None):
         draw_hole(hole)
 
     draw_mole_sprite()
+    draw_hammer_sprite()
 
     if game_running:
         update_cursor_indicator()
@@ -490,6 +583,7 @@ def poll_sensor():
 
         coord_label.config(text=f"x={cursor_x_m:.2f}m y={cursor_y_m:.2f}m (sensor)")
         update_cursor_indicator()
+        draw_hammer_sprite()
         check_whack()
 
     root.after(50, poll_sensor)
@@ -610,6 +704,10 @@ def create_game():
     global mole_image_source
     global mole_image_photo
     global mole_image_id
+    global hammer_image_source
+    global hammer_image_photo
+    global hammer_image_id
+    global hammer_image_size
 
     score_label = tk.Label(
         root,
@@ -649,6 +747,20 @@ def create_game():
         0,
         0,
         anchor="s",
+        state="hidden"
+    )
+
+    hammer_image_source = Image.open(
+        "Assets/Hammer.png"
+    ).convert("RGBA")
+
+    hammer_image_photo = None
+    hammer_image_size = None
+
+    hammer_image_id = container.create_image(
+        0,
+        0,
+        anchor="nw",
         state="hidden"
     )
 
@@ -727,16 +839,12 @@ def poll_mouse():
                     text=f"x={cursor_x_m:.2f}m y={cursor_y_m:.2f}m"
             )
 
-                print(
-                    f"cursor px=({px}, {py})  "
-                    f"m=({cursor_x_m:.2f}, {cursor_y_m:.2f})"
-            )
+                update_cursor_indicator()
+                draw_hammer_sprite()
+                check_whack()
 
-            update_cursor_indicator()
-            check_whack()
-
-    # Check mouse position again in 20 ms
-    root.after(20, poll_mouse)
+    # Check mouse position again in 5 ms
+    root.after(5, poll_mouse)
 # -------------------------
 # Schedule Next Mole
 # -------------------------
@@ -1032,5 +1140,5 @@ root.bind("<Escape>", return_to_menu)
 root.bind("<F11>", toggle_fullscreen)
 
 root.after(50, poll_sensor)
-root.after(20, poll_mouse)
+root.after(5, poll_mouse)
 root.mainloop()
