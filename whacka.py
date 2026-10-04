@@ -54,20 +54,26 @@ time_remaining = ROUND_DURATION
 # Difficulty (combo-based)
 # -------------------------
 # Higher levels make the mole appear for a shorter time, reduce the
-# waiting time between moles, and shrink the mole's visible size.
+# Higher levels make the mole appear for a shorter time, reduce the
+# waiting time between moles, and speed up the rise and fall animations.
 difficulty_settings = {
     "Easy": {
-        "up_time": (900, 1200),   # Minimum, Maximum, longer number will make mole stay up longer
-        "wait_time": (700, 1000), # randomly pick with minimum and maximum, lower wait time means mole disappear faster
-
+        "up_time": (900, 1200),
+        "wait_time": (700, 1000),
+        "rise_time": 180,
+        "fall_time": 160
     },
     "Medium": {
         "up_time": (600, 900),
         "wait_time": (450, 700),
+        "rise_time": 145,
+        "fall_time": 130
     },
     "Hard": {
         "up_time": (350, 600),
         "wait_time": (250, 450),
+        "rise_time": 115,
+        "fall_time": 105
     },
 }
 
@@ -119,6 +125,15 @@ PLAYFIELD_FRONT_RIGHT = (0.871, 0.675)
 mole_image_source = None
 mole_image_photo = None
 mole_image_id = None
+
+mole_hit_image_source = None
+
+mole_state = "hidden"
+mole_visible_fraction = 0.0
+mole_animation_timer = None
+
+MOLE_HIT_DURATION_MS = 225
+MOLE_ANIMATION_STEPS = 12
 
 hammer_image_source = None
 hammer_image_photo = None
@@ -202,7 +217,11 @@ def draw_mole_sprite():
     if mole_image_id is None:
         return
 
-    if mole is None:
+    if (
+        mole is None
+        or mole_state == "hidden"
+        or mole_visible_fraction <= 0.0
+    ):
         container.itemconfig(
             mole_image_id,
             state="hidden"
@@ -210,9 +229,9 @@ def draw_mole_sprite():
         return
 
     x1, y1, x2, y2 = get_hole_bounds(
-    mole,
-    1.0
-)
+        mole,
+        1.0
+    )
 
     hole_width = x2 - x1
     hole_height = y2 - y1
@@ -222,7 +241,12 @@ def draw_mole_sprite():
         int(hole_width * 0.9)
     )
 
-    source_width, source_height = mole_image_source.size
+    if mole_state == "hit":
+        source_image = mole_hit_image_source
+    else:
+        source_image = mole_image_source
+
+    source_width, source_height = source_image.size
 
     target_height = max(
         1,
@@ -233,12 +257,33 @@ def draw_mole_sprite():
         )
     )
 
-    resized_image = mole_image_source.resize(
+    resized_image = source_image.resize(
         (target_width, target_height),
         Image.Resampling.LANCZOS
     )
 
-    mole_image_photo = ImageTk.PhotoImage(resized_image)
+    visible_fraction = max(
+        0.0,
+        min(1.0, mole_visible_fraction)
+    )
+
+    visible_height = max(
+        1,
+        int(target_height * visible_fraction)
+    )
+
+    cropped_image = resized_image.crop(
+        (
+            0,
+            0,
+            target_width,
+            visible_height
+        )
+    )
+
+    mole_image_photo = ImageTk.PhotoImage(
+        cropped_image
+    )
 
     centre_x = (x1 + x2) / 2
 
@@ -257,6 +302,137 @@ def draw_mole_sprite():
         mole_image_id,
         image=mole_image_photo,
         state="normal"
+    )
+
+def animate_mole_rise(step=0):
+    global mole_state
+    global mole_visible_fraction
+    global mole_animation_timer
+    global mole_timer
+
+    if not game_running or mole is None:
+        return
+
+    if step >= MOLE_ANIMATION_STEPS:
+        mole_state = "active"
+        mole_visible_fraction = 1.0
+        mole_animation_timer = None
+
+        draw_mole_sprite()
+
+        min_time, max_time = difficulty_settings[
+            current_difficulty
+        ]["up_time"]
+
+        time_up = random.randint(
+            min_time,
+            max_time
+        )
+
+        mole_timer = root.after(
+            time_up,
+            hide_mole
+        )
+
+        check_whack()
+        return
+
+    mole_state = "rising"
+
+    progress = (
+        (step + 1) /
+        MOLE_ANIMATION_STEPS
+    )
+
+    # Smooth the movement so the mole does not rise
+    # in visibly equal, mechanical steps.
+    mole_visible_fraction = (
+        progress * progress * (3 - 2 * progress)
+    )
+
+    draw_mole_sprite()
+
+    rise_duration = difficulty_settings[
+        current_difficulty
+    ]["rise_time"]
+
+    frame_delay = max(
+        1,
+        rise_duration //
+        MOLE_ANIMATION_STEPS
+    )
+
+    mole_animation_timer = root.after(
+        frame_delay,
+        lambda: animate_mole_rise(step + 1)
+    )
+
+
+def start_mole_fall():
+    global mole_state
+    global mole_animation_timer
+
+    if mole is None:
+        return
+
+    mole_animation_timer = None
+    mole_state = "falling"
+
+    animate_mole_fall(0)
+
+
+def animate_mole_fall(step=0):
+    global mole
+    global mole_state
+    global mole_visible_fraction
+    global mole_animation_timer
+
+    if mole is None:
+        return
+
+    if step >= MOLE_ANIMATION_STEPS:
+        mole = None
+        mole_state = "hidden"
+        mole_visible_fraction = 0.0
+        mole_animation_timer = None
+
+        draw_mole_sprite()
+
+        if game_running:
+            schedule_next_mole()
+
+        return
+
+    mole_state = "falling"
+
+    progress = (
+        step /
+    MOLE_ANIMATION_STEPS
+    )
+
+    smooth_progress = (
+        progress * progress * (3 - 2 * progress)
+    )
+
+    mole_visible_fraction = (
+        1.0 - smooth_progress
+    )
+
+    draw_mole_sprite()
+
+    fall_duration = difficulty_settings[
+        current_difficulty
+    ]["fall_time"]
+
+    frame_delay = max(
+        1,
+        fall_duration //
+        MOLE_ANIMATION_STEPS
+    )
+
+    mole_animation_timer = root.after(
+        frame_delay,
+        lambda: animate_mole_fall(step + 1)
     )
 
 def draw_hammer_sprite():
@@ -704,6 +880,7 @@ def create_game():
     global mole_image_source
     global mole_image_photo
     global mole_image_id
+    global mole_hit_image_source
     global hammer_image_source
     global hammer_image_photo
     global hammer_image_id
@@ -739,6 +916,10 @@ def create_game():
 
     mole_image_source = Image.open(
         "Assets/Idle mole.png"
+    ).convert("RGBA")
+
+    mole_hit_image_source = Image.open(
+        "Assets/Mole Hit.png"
     ).convert("RGBA")
 
     mole_image_photo = None
@@ -870,9 +1051,10 @@ def schedule_next_mole():
 # -------------------------
 
 def show_mole():
-
     global mole
     global mole_timer
+    global mole_state
+    global mole_visible_fraction
 
     if not game_running:
         return
@@ -881,60 +1063,49 @@ def show_mole():
     # Make sure there isn't already a mole
     if mole is not None:
         return
+
     if not holes:
         schedule_next_mole()
         return
+
     # Pick random hole
     mole = random.choice(holes)
-    draw_mole_sprite()
 
-    # Decide how long mole stays up
-    min_time, max_time = difficulty_settings[current_difficulty]["up_time"]
+    mole_state = "rising"
+    mole_visible_fraction = 0.0
+    mole_timer = None
 
-    time_up = random.randint(
-        min_time,
-        max_time
-    )
-
-    # Start mole's timer
-    mole_timer = root.after(
-        time_up,
-        hide_mole
-    )
-    check_whack()
+    animate_mole_rise()
 
 # -------------------------
 # Hide Mole
 # -------------------------
 
 def hide_mole():
-
-    global mole
     global mole_timer
     global combo
 
+    if mole is None:
+        return
+
+    if mole_state != "active":
+        return
+
     # If the mole disappears without being hit,
     # the player's combo is broken
-    if mole is not None:
+    combo = 0
 
-        combo = 0
+    # Recalculate difficulty after combo is reset
+    update_difficulty()
 
-        # Recalculate difficulty after combo is reset
-        update_difficulty()
-
-        # Update the display
-        score_label.config(
-            text=f"Score: {score} | Combo: {combo} | Level: {current_difficulty}"
-        )
-
-        old_mole = mole
-        mole = None
-        draw_mole_sprite()
+    # Update the display
+    score_label.config(
+        text=f"Score: {score} | Combo: {combo} | Level: {current_difficulty}"
+    )
 
     mole_timer = None
 
-    # Schedule ONE new mole
-    schedule_next_mole()
+    start_mole_fall()
 
 
 # -------------------------
@@ -947,9 +1118,12 @@ def check_whack():
     global combo
     global mole
     global mole_timer
+    global mole_state
+    global mole_visible_fraction
+    global mole_animation_timer
 
-    # No mole = nothing to hit
-    if mole is None:
+    # Only a fully raised, active mole can be hit
+    if mole is None or mole_state != "active":
         return
 
     mole_x_m = mole["x_m"]
@@ -983,13 +1157,16 @@ def check_whack():
             root.after_cancel(mole_timer)
             mole_timer = None
 
-        # Make mole go down immediately
-        old_mole = mole
-        mole = None
+        # Show the hit sprite before the mole falls
+        mole_state = "hit"
+        mole_visible_fraction = 1.0
+
         draw_mole_sprite()
 
-        # Schedule ONE new mole
-        schedule_next_mole()
+        mole_animation_timer = root.after(
+            MOLE_HIT_DURATION_MS,
+            start_mole_fall
+        )
 
 def update_cursor_indicator():
     if not holes or not game_running:
@@ -1035,20 +1212,34 @@ def end_round():
     global mole_timer
     global next_mole_timer
     global round_timer_id
+    global mole_animation_timer
+    global mole_state
+    global mole_visible_fraction
+
     game_running = False
+
     if mole_timer is not None:
         root.after_cancel(mole_timer)
         mole_timer = None
+
     if next_mole_timer is not None:
         root.after_cancel(next_mole_timer)
         next_mole_timer = None
+
     if round_timer_id is not None:
         root.after_cancel(round_timer_id)
         round_timer_id = None
+
+    if mole_animation_timer is not None:
+        root.after_cancel(mole_animation_timer)
+        mole_animation_timer = None
+
     if mole is not None:
-        old_mole = mole
         mole = None
+        mole_state = "hidden"
+        mole_visible_fraction = 0.0
         draw_mole_sprite()
+
     show_game_over()
 
 # -------------------------
@@ -1105,6 +1296,9 @@ def return_to_menu(event=None):
     global mole_timer
     global next_mole_timer
     global round_timer_id
+    global mole_animation_timer
+    global mole_state
+    global mole_visible_fraction
     # Stop the game
     game_running = False
 
@@ -1113,18 +1307,22 @@ def return_to_menu(event=None):
         root.after_cancel(mole_timer)
         mole_timer = None
 
-    if next_mole_timer is not None:
-        root.after_cancel(next_mole_timer)
-        next_mole_timer = None
-        
     if round_timer_id is not None:
         root.after_cancel(round_timer_id)
         round_timer_id = None
 
-    # Remove the current mole
+    if next_mole_timer is not None:
+        root.after_cancel(next_mole_timer)
+        next_mole_timer = None
+
+    if mole_animation_timer is not None:
+        root.after_cancel(mole_animation_timer)
+        mole_animation_timer = None
+
     if mole is not None:
-        old_mole = mole
         mole = None
+        mole_state = "hidden"
+        mole_visible_fraction = 0.0
         draw_mole_sprite()
 
     # Return to start menu
