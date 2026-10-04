@@ -1,6 +1,7 @@
 import threading
 import tkinter as tk
 import random
+import statistics
 import time
 
 
@@ -179,9 +180,9 @@ def redraw_playfield(event=None):
 # moments never agree on when a slot begins.
 
 box_ports = {          # BOX_ID -> COM port. Box 1 is the left column, 3 the right.
-    1: "COM6",
+    1: "COM11",
     2: "COM7",
-    3: "COM8",
+    3: "COM13",
 }
 baud_rate = 115200
 poll_timeout_s = 0.1   # a box answers well inside this; a missing one costs this much
@@ -286,6 +287,42 @@ assert pick_box({1: 900, 2: 700}, 1) == 2      # 200mm closer is
 assert pick_box({1: 900, 2: 800}, 3) == 2      # owner dropped out: nearest wins
 
 
+def box_x_mm(box_id):
+    return (box_id - 0.5) * (ROOM_WIDTH_M / GRID_COLS) * 1000
+
+
+def trilaterate(seen, anchor_id):
+    anchor_x = box_x_mm(anchor_id)
+    # Only the anchor's neighbours: two objects in front of boxes 1 and 3 would
+    ids = [k for k in seen
+           if k == anchor_id
+           or (abs(k - anchor_id) == 1
+               and abs(seen[k] - seen[anchor_id]) < abs(box_x_mm(k) - anchor_x))]
+    if len(ids) < 2:
+        return None
+    slope, intercept = statistics.linear_regression(
+        [box_x_mm(k) for k in ids],
+        [seen[k] ** 2 - box_x_mm(k) ** 2 for k in ids],
+    )
+    x = -slope / 2
+    if intercept < x * x:
+        return None
+    return x, (intercept - x * x) ** 0.5
+
+
+def _ranges_to(x, y):
+    return {k: round(((x - box_x_mm(k)) ** 2 + y * y) ** 0.5) for k in (1, 2, 3)}
+
+
+_spot = trilaterate(_ranges_to(500, 1300), 1)                   
+assert abs(_spot[0] - 500) < 5 and abs(_spot[1] - 1300) < 5
+_spot = trilaterate({**_ranges_to(500, 1300), 1: 550}, 2)       
+assert abs(_spot[0] - 500) < 5 and abs(_spot[1] - 1300) < 5
+assert trilaterate({2: 1300}, 2) is None                          
+assert trilaterate({1: 550, 2: 1300}, 2) is None                  
+assert trilaterate({1: 565, 2: 2210, 3: 545}, 3) is None          
+
+
 def in_dead_zone(seen):
     """Any box sees someone in the dead zone - not just the box owning the cursor,
     which stickiness can leave on a box further away than the closest one."""
@@ -339,14 +376,20 @@ def poll_sensor():
 
     box_id = pick_box(seen, active_box_id)
     if box_id is not None and game_running:
-        distance = seen[box_id]
         active_box_id = box_id
-        # BOX_ID is the column: which box sees you is your left/centre/right cell,
-        # and that box's distance is how far down the grid you are.
-        cursor_x_m = (box_id - 0.5) * (ROOM_WIDTH_M / GRID_COLS)
-        cursor_y_m = distance_to_metres(distance)
+        spot = trilaterate(seen, box_id)
+        if spot is not None:
+            # Two or more boxes see you: their distances pin down x as well as y.
+            cursor_x_m = max(0.0, min(ROOM_WIDTH_M, spot[0] / 1000))
+            cursor_y_m = distance_to_metres(spot[1])
+            source = "trilateration"
+        else:
+            # is how far down the grid you are.
+            cursor_x_m = box_x_mm(box_id) / 1000
+            cursor_y_m = distance_to_metres(seen[box_id])
+            source = f"box {box_id}"
 
-        coord_label.config(text=f"x={cursor_x_m:.2f}m y={cursor_y_m:.2f}m (box {box_id})")
+        coord_label.config(text=f"x={cursor_x_m:.2f}m y={cursor_y_m:.2f}m ({source})")
         update_cursor_indicator()
         check_whack()
 
