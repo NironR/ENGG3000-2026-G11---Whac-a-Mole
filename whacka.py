@@ -116,6 +116,9 @@ DEFAULT_HOLE_PAD = 20  # grid padding at mole_scale == 1.0
 arcade_background_source = None
 arcade_background_photo = None
 arcade_background_id = None
+hud_score_id = None
+hud_time_id = None
+
 # Playfield corners as fractions of the arcade cabinet image.
 # These define the perspective trapezoid containing the six holes.
 PLAYFIELD_BACK_LEFT = (0.228, 0.504)
@@ -746,6 +749,62 @@ def draw_arcade_background():
 
     container.tag_lower(arcade_background_id)
 
+def draw_hud():
+    if (
+        hud_score_id is None
+        or hud_time_id is None
+    ):
+        return
+
+    image_x, image_y, image_width, image_height = (
+        get_arcade_image_geometry()
+    )
+
+    score_x = image_x + image_width * 0.291
+    score_y = image_y + image_height * 0.350
+
+    time_x = image_x + image_width * 0.710
+    time_y = image_y + image_height * 0.350
+
+    font_size = max(
+        10,
+        int(image_height * 0.024)
+    )
+
+    if game_running:
+        displayed_time = time_remaining
+    else:
+        displayed_time = ROUND_DURATION
+
+    container.coords(
+        hud_score_id,
+        score_x,
+        score_y
+    )
+
+    container.itemconfig(
+        hud_score_id,
+        text=str(score),
+        fill="#F5A623",
+        font=("Impact", font_size)
+    )
+
+    container.coords(
+        hud_time_id,
+        time_x,
+        time_y
+    )
+
+    container.itemconfig(
+        hud_time_id,
+        text=str(displayed_time),
+        fill = "#F5A623",
+        font=("Impact", font_size)
+    )
+
+    container.tag_raise(hud_score_id)
+    container.tag_raise(hud_time_id)
+
 def redraw_playfield(event=None):
     draw_arcade_background()
 
@@ -754,6 +813,7 @@ def redraw_playfield(event=None):
 
     draw_mole_sprite()
     draw_hammer_sprite()
+    draw_hud()
 
     if game_running:
         update_cursor_indicator()
@@ -977,6 +1037,8 @@ def create_game():
     global arcade_background_source
     global arcade_background_photo
     global arcade_background_id
+    global hud_score_id
+    global hud_time_id
     global mole_image_source
     global mole_image_photo
     global mole_image_id
@@ -994,13 +1056,11 @@ def create_game():
         text="Score: 0 | Combo: 0 | Level: Easy",
         font=("Arial", 18, "bold")
     )
-    score_label.pack(pady=5)
     timer_label = tk.Label(
         root,
         text=f"Time: {ROUND_DURATION}s",
         font=("arial", 14, "bold")
     )
-    timer_label.pack(pady=2) #Adds 2 pixels between timer and score
 
     container = tk.Canvas(root, bg="lightgreen", highlightthickness=0)
     container.pack(fill=tk.BOTH, expand=True)
@@ -1016,6 +1076,22 @@ def create_game():
     0,
     anchor="center"
 )
+
+    hud_score_id = container.create_text(
+        0,
+        0,
+        text="0",
+        fill="#F5A623",
+        anchor="center"
+    )
+
+    hud_time_id = container.create_text(
+        0,
+        0,
+        text=str(ROUND_DURATION),
+        fill="#F5A623",
+        anchor="center"
+    )
 
     mole_image_source = Image.open(
         "Assets/Idle mole.png"
@@ -1208,6 +1284,8 @@ def hide_mole():
         text=f"Score: {score} | Combo: {combo} | Level: {current_difficulty}"
     )
 
+    draw_hud()
+
     mole_timer = None
 
     start_mole_fall()
@@ -1284,6 +1362,8 @@ def check_whack():
             text=f"Score: {score} | Combo: {combo} | Level: {current_difficulty}"
         )
 
+        draw_hud()
+
         # IMPORTANT:
         # Cancel the mole's existing timer
         if mole_timer is not None:
@@ -1335,6 +1415,7 @@ def tick_round_timer():
     if not game_running:
         return
     timer_label.config(text=f"Time: {time_remaining}s")
+    draw_hud()
     if time_remaining <= 0:
         end_round()
         return
