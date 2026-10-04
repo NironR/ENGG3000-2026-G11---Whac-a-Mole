@@ -2,6 +2,7 @@ import threading
 import tkinter as tk
 import random
 import time
+import json
 
 
 #import guard winsound for non-Windows platforms
@@ -47,8 +48,84 @@ round_timer_id = None
 # -------------------------
 # Round Timer
 # -------------------------
-ROUND_DURATION = 60 #Timer in seconds
+ROUND_DURATION = 10 #Timer in seconds
 time_remaining = ROUND_DURATION
+
+# -------------------------
+# Leaderboard System
+# -------------------------
+
+LEADERBOARD_FILE = "leaderboard.json"
+MAX_LEADERBOARD_ENTRIES = 5
+
+
+def load_leaderboard():
+    """Load saved leaderboard scores from the JSON file."""
+    try:
+        with open(LEADERBOARD_FILE, "r") as file:
+            return json.load(file)
+
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+
+def save_leaderboard(leaderboard):
+    """Save leaderboard scores to the JSON file."""
+    with open(LEADERBOARD_FILE, "w") as file:
+        json.dump(leaderboard, file, indent=4)
+
+
+def add_leaderboard_score(player_name, player_score):
+    """Add a new score and keep only the top five results."""
+
+    leaderboard = load_leaderboard()
+
+    leaderboard.append({
+        "name": player_name,
+        "score": player_score
+    })
+
+    # Highest score appears first
+    leaderboard.sort(
+        key=lambda entry: entry["score"],
+        reverse=True
+    )
+
+    # Keep only the top five scores
+    leaderboard = leaderboard[:MAX_LEADERBOARD_ENTRIES]
+
+    save_leaderboard(leaderboard)
+
+    return leaderboard
+
+def display_leaderboard(parent):
+    """Display the current top five leaderboard."""
+
+    leaderboard = load_leaderboard()
+
+    tk.Label(
+        parent,
+        text="TOP 5 LEADERBOARD",
+        font=("Arial", 16, "bold")
+    ).pack(pady=(15, 5))
+
+    if not leaderboard:
+        tk.Label(
+            parent,
+            text="No scores yet",
+            font=("Arial", 12)
+        ).pack()
+
+        return
+
+    for position, entry in enumerate(leaderboard, start=1):
+
+        tk.Label(
+            parent,
+            text=f"{position}. {entry['name']} - {entry['score']}",
+            font=("Arial", 12)
+        ).pack()
+
 # -------------------------
 # Difficulty (combo-based)
 # -------------------------
@@ -793,33 +870,105 @@ def end_round():
 # Game Over
 # -------------------------
 def show_game_over():
+
     for widget in root.winfo_children():
         widget.destroy()
-        
+
     tk.Label(
         root,
         text="GAME OVER",
         font=("Arial", 32, "bold")
-    ).pack(pady=30)
+    ).pack(pady=(20, 10))
+
     tk.Label(
         root,
         text=f"Final Score: {score}",
         font=("Arial", 20)
-    ).pack(pady=10)
+    ).pack(pady=5)
+
+    # -------------------------
+    # Player name entry
+    # -------------------------
+
+    tk.Label(
+        root,
+        text="Enter your name:",
+        font=("Arial", 12)
+    ).pack(pady=(10, 2))
+
+    name_entry = tk.Entry(
+        root,
+        font=("Arial", 14),
+        width=20
+    )
+    name_entry.pack(pady=5)
+
+    message_label = tk.Label(
+        root,
+        text="",
+        font=("Arial", 11)
+    )
+    message_label.pack()
+
+    leaderboard_frame = tk.Frame(root)
+    leaderboard_frame.pack()
+
+    # Show scores already saved
+    display_leaderboard(leaderboard_frame)
+
+    def submit_score():
+
+        player_name = name_entry.get().strip()
+
+        if not player_name:
+            message_label.config(
+                text="Please enter a name."
+            )
+            return
+
+        add_leaderboard_score(
+            player_name,
+            score
+        )
+
+        message_label.config(
+            text="Score saved!"
+        )
+
+        # Stop the same score being submitted multiple times
+        name_entry.config(state="disabled")
+        save_button.config(state="disabled")
+
+        # Refresh leaderboard
+        for widget in leaderboard_frame.winfo_children():
+            widget.destroy()
+
+        display_leaderboard(leaderboard_frame)
+
+    save_button = tk.Button(
+        root,
+        text="Save Score",
+        font=("Arial", 12),
+        command=submit_score
+    )
+    save_button.pack(pady=5)
+
     tk.Button(
         root,
         text="Play Again",
         font=("Arial", 16),
         width=15,
-        command=lambda:start_game(current_difficulty)
-    ).pack(pady=10)
+        command=lambda: start_game("Easy")
+    ).pack(pady=5)
+
     tk.Button(
         root,
         text="Main Menu",
         font=("Arial", 14),
         width=15,
         command=start_menu
-        ).pack(pady=5)
+    ).pack(pady=5)
+
 def update_coord_display():
     if game_running:
         grid_row, grid_col = get_hole_grid_cell(cursor_x_m, cursor_y_m)
