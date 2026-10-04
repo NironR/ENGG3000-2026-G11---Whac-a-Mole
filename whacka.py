@@ -37,6 +37,7 @@ root.resizable(True, True)# Horizontal, Vertical
 # -------------------------
 
 score = 0
+successful_hits = 0
 mole = None
 game_running = False
 
@@ -91,9 +92,9 @@ current_difficulty = "Easy"
 def update_difficulty():
     global current_difficulty
 
-    if score >= 20 or combo >= 5:
+    if successful_hits >= 20 or combo >= 5:
         current_difficulty = "Hard"
-    elif score >= 8 or combo >= 3:
+    elif successful_hits >= 8 or combo >= 3:
         current_difficulty = "Medium"
     else:
         current_difficulty = "Easy"
@@ -131,6 +132,9 @@ mole_hit_image_source = None
 mole_state = "hidden"
 mole_visible_fraction = 0.0
 mole_animation_timer = None
+mole_active_started_at = None
+mole_active_duration_ms = 0
+
 
 MOLE_HIT_DURATION_MS = 225
 MOLE_ANIMATION_STEPS = 12
@@ -317,6 +321,8 @@ def animate_mole_rise(step=0):
     global mole_visible_fraction
     global mole_animation_timer
     global mole_timer
+    global mole_active_started_at
+    global mole_active_duration_ms
 
     if not game_running or mole is None:
         return
@@ -336,6 +342,9 @@ def animate_mole_rise(step=0):
             min_time,
             max_time
         )
+
+        mole_active_started_at = time.monotonic()
+        mole_active_duration_ms = time_up
 
         mole_timer = root.after(
             time_up,
@@ -902,10 +911,12 @@ def start_game(difficulty):
     global score
     global combo
     global game_running
+    global successful_hits
 
     current_difficulty = difficulty
     score = 0
     combo = 0
+    successful_hits = 0
     game_running = False
 
     for widget in root.winfo_children():
@@ -1215,6 +1226,9 @@ def check_whack():
     global mole_state
     global mole_visible_fraction
     global mole_animation_timer
+    global successful_hits
+    global mole_active_started_at
+    global mole_active_duration_ms
 
     # Only a fully raised, active mole can be hit
     if mole is None or mole_state != "active":
@@ -1225,13 +1239,39 @@ def check_whack():
     dx = cursor_x_m - mole_x_m
     dy = cursor_y_m - mole_y_m
     distance_m = (dx*dx+dy*dy)**0.5
+
     if distance_m <= WHACK_RADIUS_M:
-    # Check whether click hit the mole
-    
+        # Check how quickly the active mole was hit.
+        elapsed_ms = (
+            time.monotonic() -
+            mole_active_started_at
+        ) * 1000
 
+        if mole_active_duration_ms > 0:
+            reaction_fraction = (
+                elapsed_ms /
+                mole_active_duration_ms
+            )
+        else:
+            reaction_fraction = 1.0
 
-        # Increase score after a successful hit
-        score += 1
+        reaction_fraction = max(
+            0.0,
+            min(1.0, reaction_fraction)
+        )
+
+        # Faster hits award more points.
+        if reaction_fraction <= 0.25:
+            points_earned = 100
+        elif reaction_fraction <= 0.50:
+            points_earned = 75
+        elif reaction_fraction <= 0.75:
+            points_earned = 50
+        else:
+            points_earned = 25
+
+        score += points_earned
+        successful_hits += 1
 
         # Increase combo after a consecutive successful hit
         combo += 1
