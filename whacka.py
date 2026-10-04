@@ -56,18 +56,18 @@ time_remaining = ROUND_DURATION
 # waiting time between moles, and shrink the mole's visible size.
 difficulty_settings = {
     "Easy": {
-        "up_time": (900, 1200),   # Minimum, Maximum, longer number will make mole stay up longer
-        "wait_time": (700, 1000), # randomly pick with minimum and maximum, lower wait time means mole disappear faster
+        "up_time": (1800, 2500),   # Minimum, Maximum, longer number will make mole stay up longer
+        "wait_time": (1200, 1800), # randomly pick with minimum and maximum, lower wait time means mole disappear faster
         "mole_scale": 1.0         # Normal mole size
     },
     "Medium": {
-        "up_time": (600, 900),
-        "wait_time": (450, 700),
+        "up_time": (1200, 1800),
+        "wait_time": (800, 1200),
         "mole_scale": 0.8         # Mole is reduced to 80% of normal size
     },
     "Hard": {
-        "up_time": (350, 600),
-        "wait_time": (250, 450),
+        "up_time": (800, 1200),
+        "wait_time": (500, 800),
         "mole_scale": 0.6         # Mole is reduced to 60% of normal size
     },
 }
@@ -92,6 +92,22 @@ def update_difficulty():
         current_difficulty = "Medium"
     else:
         current_difficulty = "Easy"
+
+# -------------------------
+# Combo-Based Scoring
+# -------------------------
+# Higher combos give the player more points.
+# Combo 1-2 = 1 point
+# Combo 3-4 = 2 points
+# Combo 5+ = 3 points
+
+def get_hit_points():
+    if combo >= 5:
+        return 3
+    elif combo >= 3:
+        return 2
+    else:
+        return 1
 
 # -------------------------
 #Grid tracking
@@ -681,11 +697,14 @@ def check_whack():
     
 
 
-        # Increase score after a successful hit
-        score += 1
-
-        # Increase combo after a consecutive successful hit
+        # Increase combo after a successful hit
         combo += 1
+
+        # Calculate points based on the current combo
+        points = get_hit_points()
+
+        # Add the awarded points to the total score
+        score += points
 
         # Check whether the difficulty level should increase
         update_difficulty()
