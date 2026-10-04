@@ -140,6 +140,14 @@ hammer_image_photo = None
 hammer_image_id = None
 hammer_image_size = None
 
+hammer_frame_photos = []
+hammer_frame_index = 0
+hammer_animation_timer = None
+
+HAMMER_STRIKE_ANGLES = (0, -10, -22)
+HAMMER_STRIKE_SEQUENCE = (1, 2, 1, 0)
+HAMMER_STRIKE_FRAME_MS = 35
+
 HAMMER_WIDTH_FRACTION = 0.22
 
 # Position of the striking head within Hammer.png.
@@ -438,6 +446,7 @@ def animate_mole_fall(step=0):
 def draw_hammer_sprite():
     global hammer_image_photo
     global hammer_image_size
+    global hammer_frame_photos
 
     if hammer_image_id is None:
         return
@@ -472,20 +481,56 @@ def draw_hammer_sprite():
         )
     )
 
-    target_size = (target_width, target_height)
+    target_size = (
+        target_width,
+        target_height
+    )
 
-    # Only resize the hammer when its required display size changes.
+    # Rebuild the cached hammer frames only when
+    # the displayed hammer size changes.
     if hammer_image_size != target_size:
         resized_image = hammer_image_source.resize(
             target_size,
             Image.Resampling.LANCZOS
         )
 
-        hammer_image_photo = ImageTk.PhotoImage(
-            resized_image
+        strike_centre = (
+            target_width * HAMMER_STRIKE_X_FRACTION,
+            target_height * HAMMER_STRIKE_Y_FRACTION
         )
 
+        hammer_frame_photos = []
+
+        for angle in HAMMER_STRIKE_ANGLES:
+            rotated_image = resized_image.rotate(
+                angle,
+                resample=Image.Resampling.BICUBIC,
+                center=strike_centre
+            )
+
+            hammer_frame_photos.append(
+                ImageTk.PhotoImage(rotated_image)
+            )
+
         hammer_image_size = target_size
+
+    if not hammer_frame_photos:
+        return
+
+    frame_index = max(
+        0,
+        min(
+            hammer_frame_index,
+            len(hammer_frame_photos) - 1
+        )
+    )
+
+    active_photo = hammer_frame_photos[
+        frame_index
+    ]
+
+    if hammer_image_photo is not active_photo:
+        hammer_image_photo = active_photo
 
         container.itemconfig(
             hammer_image_id,
@@ -514,6 +559,50 @@ def draw_hammer_sprite():
     )
 
     container.tag_raise(hammer_image_id)
+
+def start_hammer_strike():
+    global hammer_animation_timer
+    global hammer_frame_index
+
+    if hammer_animation_timer is not None:
+        root.after_cancel(
+            hammer_animation_timer
+        )
+        hammer_animation_timer = None
+
+    hammer_frame_index = 0
+
+    animate_hammer_strike()
+
+
+def animate_hammer_strike(step=0):
+    global hammer_frame_index
+    global hammer_animation_timer
+
+    if not game_running:
+        hammer_frame_index = 0
+        hammer_animation_timer = None
+        return
+
+    if step >= len(HAMMER_STRIKE_SEQUENCE):
+        hammer_frame_index = 0
+        hammer_animation_timer = None
+
+        draw_hammer_sprite()
+        return
+
+    hammer_frame_index = HAMMER_STRIKE_SEQUENCE[
+        step
+    ]
+
+    draw_hammer_sprite()
+
+    hammer_animation_timer = root.after(
+        HAMMER_STRIKE_FRAME_MS,
+        lambda: animate_hammer_strike(
+            step + 1
+        )
+    )
 
 def get_arcade_image_geometry():
     width = max(container.winfo_width(), 1)
@@ -885,6 +974,9 @@ def create_game():
     global hammer_image_photo
     global hammer_image_id
     global hammer_image_size
+    global hammer_frame_photos
+    global hammer_frame_index
+    global hammer_animation_timer
 
     score_label = tk.Label(
         root,
@@ -937,7 +1029,9 @@ def create_game():
 
     hammer_image_photo = None
     hammer_image_size = None
-
+    hammer_frame_photos = []
+    hammer_frame_index = 0
+    hammer_animation_timer = None
     hammer_image_id = container.create_image(
         0,
         0,
@@ -1153,9 +1247,10 @@ def check_whack():
         # IMPORTANT:
         # Cancel the mole's existing timer
         if mole_timer is not None:
-
             root.after_cancel(mole_timer)
             mole_timer = None
+
+        start_hammer_strike()
 
         # Show the hit sprite before the mole falls
         mole_state = "hit"
@@ -1215,6 +1310,8 @@ def end_round():
     global mole_animation_timer
     global mole_state
     global mole_visible_fraction
+    global hammer_animation_timer
+    global hammer_frame_index
 
     game_running = False
 
@@ -1233,6 +1330,12 @@ def end_round():
     if mole_animation_timer is not None:
         root.after_cancel(mole_animation_timer)
         mole_animation_timer = None
+
+    if hammer_animation_timer is not None:
+        root.after_cancel(hammer_animation_timer)
+        hammer_animation_timer = None
+
+    hammer_frame_index = 0
 
     if mole is not None:
         mole = None
@@ -1299,6 +1402,9 @@ def return_to_menu(event=None):
     global mole_animation_timer
     global mole_state
     global mole_visible_fraction
+    global hammer_animation_timer
+    global hammer_frame_index
+
     # Stop the game
     game_running = False
 
@@ -1318,6 +1424,12 @@ def return_to_menu(event=None):
     if mole_animation_timer is not None:
         root.after_cancel(mole_animation_timer)
         mole_animation_timer = None
+
+    if hammer_animation_timer is not None:
+        root.after_cancel(hammer_animation_timer)
+        hammer_animation_timer = None
+
+    hammer_frame_index = 0
 
     if mole is not None:
         mole = None
