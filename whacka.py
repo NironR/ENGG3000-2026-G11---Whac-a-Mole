@@ -19,8 +19,8 @@ except ImportError:
 #-------------------------
 try:
     import serial
-    from boxes import BOX_BT_ADDRS, find_port
-    serial_available = True
+    from boxes import BOX_IDS, find_port, open_port
+    serial_available = True     
 except ImportError:
     serial_available = False
 
@@ -940,7 +940,7 @@ CURSOR_SMOOTHING = 0.4
 MAX_MISSES = 3
 
 latest_by_box = {}       # BOX_ID -> distance in mm, or None when that box sees nobody
-box_links = {box_id: None for box_id in BOX_BT_ADDRS} if serial_available else {}
+box_links = {box_id: None for box_id in BOX_IDS} if serial_available else {}
 distance_lock = threading.Lock()
 active_box_id = None     # which box currently owns the cursor
 last_warning_beep = 0.00
@@ -951,7 +951,7 @@ def read_reading(ser, box_id):
     """One DIST reply from this box, or None. Skips WARNING and any stray line."""
     for _ in range(4):
         parts = ser.readline().decode("utf-8", errors="ignore").split()
-        if len(parts) == 3 and parts[0] == str(box_id) and parts[1] == "DIST":
+        if len(parts) >= 3 and parts[0] == str(box_id) and parts[1] == "DIST":
             try:
                 return int(parts[2])
             except ValueError:
@@ -963,8 +963,8 @@ def connect_box(box_id, retry_after, connecting):
     port_name = find_port(box_id)
     try:
         if port_name is None:
-            raise serial.SerialException("not paired with this PC")
-        box_links[box_id] = serial.Serial(port_name, baud_rate, timeout=poll_timeout_s)
+            raise serial.SerialException("no port answered as this box")
+        box_links[box_id] = open_port(port_name, timeout=poll_timeout_s)
         print(f"Box {box_id} connected on {port_name}.")
     except serial.SerialException as e:
         retry_after[box_id] = time.monotonic() + port_retry_s
@@ -978,12 +978,12 @@ def serial_thread():
         print("pySerial not available. Serial communication disabled.")
         return
 
-    retry_after = {box_id: 0.0 for box_id in BOX_BT_ADDRS}
-    misses = {box_id: 0 for box_id in BOX_BT_ADDRS}
+    retry_after = {box_id: 0.0 for box_id in BOX_IDS}
+    misses = {box_id: 0 for box_id in BOX_IDS}
     connecting = set()
 
     while True:
-        for box_id in BOX_BT_ADDRS:
+        for box_id in BOX_IDS:
             if box_links[box_id] is None:
                 if box_id not in connecting and time.monotonic() >= retry_after[box_id]:
                     connecting.add(box_id)
@@ -1046,8 +1046,12 @@ assert pick_box({1: 900, 2: 700}, 1) == 2      # 200mm closer is
 assert pick_box({1: 900, 2: 800}, 3) == 2      # owner dropped out: nearest wins
 
 
+MIRROR_BOXES = True   # box 1 sits on the right of the screen (as the player sees it)
+
+
 def box_x_mm(box_id):
-    return (box_id - 0.5) * (ROOM_WIDTH_M / GRID_COLS) * 1000
+    column = GRID_COLS + 1 - box_id if MIRROR_BOXES else box_id
+    return (column - 0.5) * (ROOM_WIDTH_M / GRID_COLS) * 1000
 
 
 def trilaterate(seen, anchor_id):
@@ -1131,8 +1135,9 @@ def poll_sensor():
         seen = {box_id: d for box_id, d in latest_by_box.items()
                 if d is not None and d <= sensor_far_mm}
 
-    # Alarm is a safety feature - it fires whether or not a game is running.
-    proximity_alarm(in_dead_zone(seen))
+    # Only during a round: in the menus nobody is playing, so someone walking
+    # up to the screen to press Start would trip it.
+    proximity_alarm(game_running and in_dead_zone(seen))
 
     box_id = pick_box(seen, active_box_id)
     if box_id is not None and game_running:

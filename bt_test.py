@@ -3,16 +3,16 @@ import time
 
 import serial
 
-from boxes import BOX_BT_ADDRS, find_port
+from boxes import BOX_IDS, find_port, open_port
 
-ports = sys.argv[1:] or [find_port(box_id) for box_id in BOX_BT_ADDRS]
+ports = [a for a in sys.argv[1:] if a != "--bt"] or [find_port(box_id) for box_id in BOX_IDS]
 
 for box_id, port in enumerate(ports, 1):
     if port is None:
-        print(f"Box {box_id}: not paired with this PC")
+        print(f"Box {box_id}: no port answered")
         continue
     try:
-        ser = serial.Serial(port, 115200, timeout=1)
+        ser = open_port(port, timeout=1)
     except serial.SerialException as e:
         print(f"{port}: can't open ({e})")
         continue
