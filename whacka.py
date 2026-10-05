@@ -2,6 +2,7 @@ import threading
 import tkinter as tk
 import random
 import time
+from PIL import Image, ImageTk
 
 
 #import guard winsound for non-Windows platforms
@@ -36,6 +37,7 @@ root.resizable(True, True)# Horizontal, Vertical
 # -------------------------
 
 score = 0
+successful_hits = 0
 mole = None
 game_running = False
 
@@ -53,22 +55,26 @@ time_remaining = ROUND_DURATION
 # Difficulty (combo-based)
 # -------------------------
 # Higher levels make the mole appear for a shorter time, reduce the
-# waiting time between moles, and shrink the mole's visible size.
+# Higher levels make the mole appear for a shorter time, reduce the
+# waiting time between moles, and speed up the rise and fall animations.
 difficulty_settings = {
     "Easy": {
-        "up_time": (900, 1200),   # Minimum, Maximum, longer number will make mole stay up longer
-        "wait_time": (700, 1000), # randomly pick with minimum and maximum, lower wait time means mole disappear faster
-        "mole_scale": 1.0         # Normal mole size
+        "up_time": (900, 1200),
+        "wait_time": (700, 1000),
+        "rise_time": 180,
+        "fall_time": 160
     },
     "Medium": {
         "up_time": (600, 900),
         "wait_time": (450, 700),
-        "mole_scale": 0.8         # Mole is reduced to 80% of normal size
+        "rise_time": 145,
+        "fall_time": 130
     },
     "Hard": {
         "up_time": (350, 600),
         "wait_time": (250, 450),
-        "mole_scale": 0.6         # Mole is reduced to 60% of normal size
+        "rise_time": 115,
+        "fall_time": 105
     },
 }
 
@@ -86,9 +92,9 @@ current_difficulty = "Easy"
 def update_difficulty():
     global current_difficulty
 
-    if score >= 20 or combo >= 5:
+    if successful_hits >= 20 or combo >= 5:
         current_difficulty = "Hard"
-    elif score >= 8 or combo >= 3:
+    elif successful_hits >= 8 or combo >= 3:
         current_difficulty = "Medium"
     else:
         current_difficulty = "Easy"
@@ -100,12 +106,61 @@ ROOM_WIDTH_M = 1.5
 ROOM_HEIGHT_M = 1.4
 GRID_ROWS =  2
 GRID_COLS = 3
-WHACK_RADIUS_M = 0.1501 #Circumference around the mole
+WHACK_RADIUS_M = 0.20 #Radius around the mole for a successful hit
 cursor_x_m = 0.0
 cursor_y_m = 0.0
 
 holes = []  # hole Label widgets, in the same 2x3 order HOLE_LAYOUT_FRACTIONS used to define
 DEFAULT_HOLE_PAD = 20  # grid padding at mole_scale == 1.0
+
+arcade_background_source = None
+arcade_background_photo = None
+arcade_background_id = None
+hud_score_id = None
+hud_time_id = None
+
+# Playfield corners as fractions of the arcade cabinet image.
+# These define the perspective trapezoid containing the six holes.
+PLAYFIELD_BACK_LEFT = (0.228, 0.504)
+PLAYFIELD_BACK_RIGHT = (0.775, 0.504)
+PLAYFIELD_FRONT_LEFT = (0.130, 0.675)
+PLAYFIELD_FRONT_RIGHT = (0.871, 0.675)
+
+mole_image_source = None
+mole_image_photo = None
+mole_image_id = None
+
+mole_hit_image_source = None
+
+mole_state = "hidden"
+mole_visible_fraction = 0.0
+mole_animation_timer = None
+mole_active_started_at = None
+mole_active_duration_ms = 0
+
+
+MOLE_HIT_DURATION_MS = 225
+MOLE_ANIMATION_STEPS = 12
+
+hammer_image_source = None
+hammer_image_photo = None
+hammer_image_id = None
+hammer_image_size = None
+
+hammer_frame_photos = []
+hammer_frame_index = 0
+hammer_animation_timer = None
+
+HAMMER_STRIKE_ANGLES = (0, -10, -22)
+HAMMER_STRIKE_SEQUENCE = (1, 2, 1, 0)
+HAMMER_STRIKE_FRAME_MS = 35
+
+HAMMER_WIDTH_FRACTION = 0.22
+
+# Position of the striking head within Hammer.png.
+# Fine-tune after visually testing the sprite.
+HAMMER_STRIKE_X_FRACTION = 0.39
+HAMMER_STRIKE_Y_FRACTION = 0.28
 
 def pixel_to_metres (px,py):
     width = max (container.winfo_width(), 1)
@@ -128,17 +183,26 @@ def widget_pixel_center(widget):
         widget.winfo_y() + widget.winfo_height() / 2
     )
 
-def get_hole_bounds(hole, pad):
-    width = max(container.winfo_width(), 1)
-    height = max(container.winfo_height(), 1)
+def get_hole_bounds(hole, scale):
+    centre_x, centre_y = metres_to_canvas(
+        hole["x_m"],
+        hole["y_m"]
+    )
 
-    cell_width = width / GRID_COLS
-    cell_height = height / GRID_ROWS
+    _, _, image_width, image_height = get_arcade_image_geometry()
 
-    x1 = hole["col"] * cell_width + pad
-    y1 = hole["row"] * cell_height + pad
-    x2 = (hole["col"] + 1) * cell_width - pad
-    y2 = (hole["row"] + 1) * cell_height - pad
+    depth_fraction = hole["y_m"] / ROOM_HEIGHT_M
+
+    hole_width_fraction = 0.154 + (0.208 - 0.154) * depth_fraction
+    hole_height_fraction = 0.057 + (0.091 - 0.057) * depth_fraction
+
+    hole_width = image_width * hole_width_fraction * scale
+    hole_height = image_height * hole_height_fraction * scale
+
+    x1 = centre_x - hole_width / 2
+    y1 = centre_y - hole_height / 2
+    x2 = centre_x + hole_width / 2
+    y2 = centre_y + hole_height / 2
 
     return x1, y1, x2, y2
 
@@ -147,23 +211,609 @@ def draw_hole(hole):
     if hole["canvas_id"] is None:
         return
 
-    if hole is mole:
-        mole_scale = difficulty_settings[current_difficulty]["mole_scale"]
-        pad = int(DEFAULT_HOLE_PAD / mole_scale)
-        colour = "brown"
+    x1, y1, x2, y2 = get_hole_bounds(hole, 1.0)
+
+    container.coords(
+        hole["canvas_id"],
+        x1,
+        y1,
+        x2,
+        y2
+    )
+
+    container.itemconfig(
+        hole["canvas_id"],
+        fill=""
+    )
+
+def draw_mole_sprite():
+    global mole_image_photo
+
+    if mole_image_id is None:
+        return
+
+    if (
+        mole is None
+        or mole_state == "hidden"
+        or mole_visible_fraction <= 0.0
+    ):
+        container.itemconfig(
+            mole_image_id,
+            state="hidden"
+        )
+        return
+
+    x1, y1, x2, y2 = get_hole_bounds(
+        mole,
+        1.0
+    )
+
+    hole_width = x2 - x1
+    hole_height = y2 - y1
+
+    target_width = max(
+        1,
+        int(hole_width * 0.9)
+    )
+
+    if mole_state == "hit":
+        source_image = mole_hit_image_source
     else:
-        pad = DEFAULT_HOLE_PAD
-        colour = "black"
+        source_image = mole_image_source
 
-    x1, y1, x2, y2 = get_hole_bounds(hole, pad)
+    source_width, source_height = source_image.size
 
-    container.coords(hole["canvas_id"], x1, y1, x2, y2)
-    container.itemconfig(hole["canvas_id"], fill=colour)
+    target_height = max(
+        1,
+        int(
+            target_width *
+            source_height /
+            source_width
+        )
+    )
 
+    resized_image = source_image.resize(
+        (target_width, target_height),
+        Image.Resampling.LANCZOS
+    )
+
+    visible_fraction = max(
+        0.0,
+        min(1.0, mole_visible_fraction)
+    )
+
+    visible_height = max(
+        1,
+        int(target_height * visible_fraction)
+    )
+
+    cropped_image = resized_image.crop(
+        (
+            0,
+            0,
+            target_width,
+            visible_height
+        )
+    )
+
+    mole_image_photo = ImageTk.PhotoImage(
+        cropped_image
+    )
+
+    centre_x = (x1 + x2) / 2
+
+    mole_bottom_y = (
+        (y1 + y2) / 2 +
+        hole_height * 0.25
+    )
+
+    container.coords(
+        mole_image_id,
+        centre_x,
+        mole_bottom_y
+    )
+
+    container.itemconfig(
+        mole_image_id,
+        image=mole_image_photo,
+        state="normal"
+    )
+
+def animate_mole_rise(step=0):
+    global mole_state
+    global mole_visible_fraction
+    global mole_animation_timer
+    global mole_timer
+    global mole_active_started_at
+    global mole_active_duration_ms
+
+    if not game_running or mole is None:
+        return
+
+    if step >= MOLE_ANIMATION_STEPS:
+        mole_state = "active"
+        mole_visible_fraction = 1.0
+        mole_animation_timer = None
+
+        draw_mole_sprite()
+
+        min_time, max_time = difficulty_settings[
+            current_difficulty
+        ]["up_time"]
+
+        time_up = random.randint(
+            min_time,
+            max_time
+        )
+
+        mole_active_started_at = time.monotonic()
+        mole_active_duration_ms = time_up
+
+        mole_timer = root.after(
+            time_up,
+            hide_mole
+        )
+
+        check_whack()
+        return
+
+    mole_state = "rising"
+
+    progress = (
+        (step + 1) /
+        MOLE_ANIMATION_STEPS
+    )
+
+    # Smooth the movement so the mole does not rise
+    # in visibly equal, mechanical steps.
+    mole_visible_fraction = (
+        progress * progress * (3 - 2 * progress)
+    )
+
+    draw_mole_sprite()
+
+    rise_duration = difficulty_settings[
+        current_difficulty
+    ]["rise_time"]
+
+    frame_delay = max(
+        1,
+        rise_duration //
+        MOLE_ANIMATION_STEPS
+    )
+
+    mole_animation_timer = root.after(
+        frame_delay,
+        lambda: animate_mole_rise(step + 1)
+    )
+
+
+def start_mole_fall():
+    global mole_state
+    global mole_animation_timer
+
+    if mole is None:
+        return
+
+    mole_animation_timer = None
+    mole_state = "falling"
+
+    animate_mole_fall(0)
+
+
+def animate_mole_fall(step=0):
+    global mole
+    global mole_state
+    global mole_visible_fraction
+    global mole_animation_timer
+
+    if mole is None:
+        return
+
+    if step >= MOLE_ANIMATION_STEPS:
+        mole = None
+        mole_state = "hidden"
+        mole_visible_fraction = 0.0
+        mole_animation_timer = None
+
+        draw_mole_sprite()
+
+        if game_running:
+            schedule_next_mole()
+
+        return
+
+    mole_state = "falling"
+
+    progress = (
+        step /
+    MOLE_ANIMATION_STEPS
+    )
+
+    smooth_progress = (
+        progress * progress * (3 - 2 * progress)
+    )
+
+    mole_visible_fraction = (
+        1.0 - smooth_progress
+    )
+
+    draw_mole_sprite()
+
+    fall_duration = difficulty_settings[
+        current_difficulty
+    ]["fall_time"]
+
+    frame_delay = max(
+        1,
+        fall_duration //
+        MOLE_ANIMATION_STEPS
+    )
+
+    mole_animation_timer = root.after(
+        frame_delay,
+        lambda: animate_mole_fall(step + 1)
+    )
+
+def draw_hammer_sprite():
+    global hammer_image_photo
+    global hammer_image_size
+    global hammer_frame_photos
+
+    if hammer_image_id is None:
+        return
+
+    if not game_running:
+        container.itemconfig(
+            hammer_image_id,
+            state="hidden"
+        )
+        return
+
+    hammer_x, hammer_y = metres_to_canvas(
+        cursor_x_m,
+        cursor_y_m
+    )
+
+    _, _, image_width, _ = get_arcade_image_geometry()
+
+    target_width = max(
+        1,
+        int(image_width * HAMMER_WIDTH_FRACTION)
+    )
+
+    source_width, source_height = hammer_image_source.size
+
+    target_height = max(
+        1,
+        int(
+            target_width *
+            source_height /
+            source_width
+        )
+    )
+
+    target_size = (
+        target_width,
+        target_height
+    )
+
+    # Rebuild the cached hammer frames only when
+    # the displayed hammer size changes.
+    if hammer_image_size != target_size:
+        resized_image = hammer_image_source.resize(
+            target_size,
+            Image.Resampling.LANCZOS
+        )
+
+        strike_centre = (
+            target_width * HAMMER_STRIKE_X_FRACTION,
+            target_height * HAMMER_STRIKE_Y_FRACTION
+        )
+
+        hammer_frame_photos = []
+
+        for angle in HAMMER_STRIKE_ANGLES:
+            rotated_image = resized_image.rotate(
+                angle,
+                resample=Image.Resampling.BICUBIC,
+                center=strike_centre
+            )
+
+            hammer_frame_photos.append(
+                ImageTk.PhotoImage(rotated_image)
+            )
+
+        hammer_image_size = target_size
+
+    if not hammer_frame_photos:
+        return
+
+    frame_index = max(
+        0,
+        min(
+            hammer_frame_index,
+            len(hammer_frame_photos) - 1
+        )
+    )
+
+    active_photo = hammer_frame_photos[
+        frame_index
+    ]
+
+    if hammer_image_photo is not active_photo:
+        hammer_image_photo = active_photo
+
+        container.itemconfig(
+            hammer_image_id,
+            image=hammer_image_photo
+        )
+
+    draw_x = (
+        hammer_x -
+        target_width * HAMMER_STRIKE_X_FRACTION
+    )
+
+    draw_y = (
+        hammer_y -
+        target_height * HAMMER_STRIKE_Y_FRACTION
+    )
+
+    container.coords(
+        hammer_image_id,
+        draw_x,
+        draw_y
+    )
+
+    container.itemconfig(
+        hammer_image_id,
+        state="normal"
+    )
+
+    container.tag_raise(hammer_image_id)
+
+def start_hammer_strike():
+    global hammer_animation_timer
+    global hammer_frame_index
+
+    if hammer_animation_timer is not None:
+        root.after_cancel(
+            hammer_animation_timer
+        )
+        hammer_animation_timer = None
+
+    hammer_frame_index = 0
+
+    animate_hammer_strike()
+
+
+def animate_hammer_strike(step=0):
+    global hammer_frame_index
+    global hammer_animation_timer
+
+    if not game_running:
+        hammer_frame_index = 0
+        hammer_animation_timer = None
+        return
+
+    if step >= len(HAMMER_STRIKE_SEQUENCE):
+        hammer_frame_index = 0
+        hammer_animation_timer = None
+
+        draw_hammer_sprite()
+        return
+
+    hammer_frame_index = HAMMER_STRIKE_SEQUENCE[
+        step
+    ]
+
+    draw_hammer_sprite()
+
+    hammer_animation_timer = root.after(
+        HAMMER_STRIKE_FRAME_MS,
+        lambda: animate_hammer_strike(
+            step + 1
+        )
+    )
+
+def get_arcade_image_geometry():
+    width = max(container.winfo_width(), 1)
+    height = max(container.winfo_height(), 1)
+
+    source_width, source_height = arcade_background_source.size
+
+    scale = min(
+        width / source_width,
+        height / source_height
+    )
+
+    image_width = max(1, int(source_width * scale))
+    image_height = max(1, int(source_height * scale))
+
+    image_x = (width - image_width) / 2
+    image_y = (height - image_height) / 2
+
+    return image_x, image_y, image_width, image_height
+
+def metres_to_canvas(x_m, y_m):
+    image_x, image_y, image_width, image_height = get_arcade_image_geometry()
+
+    x_fraction = x_m / ROOM_WIDTH_M
+    y_fraction = y_m / ROOM_HEIGHT_M
+
+    back_left_x, back_y = PLAYFIELD_BACK_LEFT
+    back_right_x, _ = PLAYFIELD_BACK_RIGHT
+    front_left_x, front_y = PLAYFIELD_FRONT_LEFT
+    front_right_x, _ = PLAYFIELD_FRONT_RIGHT
+
+    left_x = back_left_x + (
+        front_left_x - back_left_x
+    ) * y_fraction
+
+    right_x = back_right_x + (
+        front_right_x - back_right_x
+    ) * y_fraction
+
+    image_fraction_x = left_x + (
+        right_x - left_x
+    ) * x_fraction
+
+    image_fraction_y = back_y + (
+        front_y - back_y
+    ) * y_fraction
+
+    canvas_x = image_x + image_fraction_x * image_width
+    canvas_y = image_y + image_fraction_y * image_height
+
+    return canvas_x, canvas_y
+
+def canvas_to_metres(px, py):
+    image_x, image_y, image_width, image_height = get_arcade_image_geometry()
+
+    image_fraction_x = (px - image_x) / image_width
+    image_fraction_y = (py - image_y) / image_height
+
+    back_left_x, back_y = PLAYFIELD_BACK_LEFT
+    back_right_x, _ = PLAYFIELD_BACK_RIGHT
+    front_left_x, front_y = PLAYFIELD_FRONT_LEFT
+    front_right_x, _ = PLAYFIELD_FRONT_RIGHT
+
+    playfield_height = front_y - back_y
+
+    if playfield_height == 0:
+        return None
+
+    y_fraction = (
+        image_fraction_y - back_y
+    ) / playfield_height
+
+    # Mouse is above or below the physical playfield
+    if not 0.0 <= y_fraction <= 1.0:
+        return None
+
+    left_x = back_left_x + (
+        front_left_x - back_left_x
+    ) * y_fraction
+
+    right_x = back_right_x + (
+        front_right_x - back_right_x
+    ) * y_fraction
+
+    # Mouse is outside the left/right edges of the
+    # perspective playfield
+    if not left_x <= image_fraction_x <= right_x:
+        return None
+
+    playfield_width = right_x - left_x
+
+    if playfield_width == 0:
+        return None
+
+    x_fraction = (
+        image_fraction_x - left_x
+    ) / playfield_width
+
+    x_m = x_fraction * ROOM_WIDTH_M
+    y_m = y_fraction * ROOM_HEIGHT_M
+
+    return x_m, y_m
+
+def draw_arcade_background():
+    global arcade_background_photo
+
+    if arcade_background_source is None or arcade_background_id is None:
+        return
+
+    width = max(container.winfo_width(), 1)
+    height = max(container.winfo_height(), 1)
+
+    _, _, new_width, new_height = get_arcade_image_geometry()
+
+    resized_image = arcade_background_source.resize(
+        (new_width, new_height),
+        Image.Resampling.LANCZOS
+    )
+
+    arcade_background_photo = ImageTk.PhotoImage(resized_image)
+
+    container.coords(
+        arcade_background_id,
+        width / 2,
+        height / 2
+    )
+
+    container.itemconfig(
+        arcade_background_id,
+        image=arcade_background_photo
+    )
+
+    container.tag_lower(arcade_background_id)
+
+def draw_hud():
+    if (
+        hud_score_id is None
+        or hud_time_id is None
+    ):
+        return
+
+    image_x, image_y, image_width, image_height = (
+        get_arcade_image_geometry()
+    )
+
+    score_x = image_x + image_width * 0.291
+    score_y = image_y + image_height * 0.350
+
+    time_x = image_x + image_width * 0.710
+    time_y = image_y + image_height * 0.350
+
+    font_size = max(
+        10,
+        int(image_height * 0.024)
+    )
+
+    if game_running:
+        displayed_time = time_remaining
+    else:
+        displayed_time = ROUND_DURATION
+
+    container.coords(
+        hud_score_id,
+        score_x,
+        score_y
+    )
+
+    container.itemconfig(
+        hud_score_id,
+        text=str(score),
+        fill="#F5A623",
+        font=("Impact", font_size)
+    )
+
+    container.coords(
+        hud_time_id,
+        time_x,
+        time_y
+    )
+
+    container.itemconfig(
+        hud_time_id,
+        text=str(displayed_time),
+        fill = "#F5A623",
+        font=("Impact", font_size)
+    )
+
+    container.tag_raise(hud_score_id)
+    container.tag_raise(hud_time_id)
 
 def redraw_playfield(event=None):
+    draw_arcade_background()
+
     for hole in holes:
         draw_hole(hole)
+
+    draw_mole_sprite()
+    draw_hammer_sprite()
+    draw_hud()
 
     if game_running:
         update_cursor_indicator()
@@ -348,6 +998,7 @@ def poll_sensor():
 
         coord_label.config(text=f"x={cursor_x_m:.2f}m y={cursor_y_m:.2f}m (box {box_id})")
         update_cursor_indicator()
+        draw_hammer_sprite()
         check_whack()
 
     root.after(50, poll_sensor)
@@ -400,10 +1051,12 @@ def start_game(difficulty):
     global score
     global combo
     global game_running
+    global successful_hits
 
     current_difficulty = difficulty
     score = 0
     combo = 0
+    successful_hits = 0
     game_running = False
 
     for widget in root.winfo_children():
@@ -461,22 +1114,97 @@ def create_game():
     global timer_label
     global coord_label
     global holes
+    global arcade_background_source
+    global arcade_background_photo
+    global arcade_background_id
+    global hud_score_id
+    global hud_time_id
+    global mole_image_source
+    global mole_image_photo
+    global mole_image_id
+    global mole_hit_image_source
+    global hammer_image_source
+    global hammer_image_photo
+    global hammer_image_id
+    global hammer_image_size
+    global hammer_frame_photos
+    global hammer_frame_index
+    global hammer_animation_timer
 
     score_label = tk.Label(
         root,
         text="Score: 0 | Combo: 0 | Level: Easy",
         font=("Arial", 18, "bold")
     )
-    score_label.pack(pady=5)
     timer_label = tk.Label(
         root,
         text=f"Time: {ROUND_DURATION}s",
         font=("arial", 14, "bold")
     )
-    timer_label.pack(pady=2) #Adds 2 pixels between timer and score
 
     container = tk.Canvas(root, bg="lightgreen", highlightthickness=0)
     container.pack(fill=tk.BOTH, expand=True)
+
+    arcade_background_source = Image.open(
+        "Assets/Arcade Machine.png"
+    ).convert("RGBA")
+
+    arcade_background_photo = None
+
+    arcade_background_id = container.create_image(
+    0,
+    0,
+    anchor="center"
+)
+
+    hud_score_id = container.create_text(
+        0,
+        0,
+        text="0",
+        fill="#F5A623",
+        anchor="center"
+    )
+
+    hud_time_id = container.create_text(
+        0,
+        0,
+        text=str(ROUND_DURATION),
+        fill="#F5A623",
+        anchor="center"
+    )
+
+    mole_image_source = Image.open(
+        "Assets/Idle mole.png"
+    ).convert("RGBA")
+
+    mole_hit_image_source = Image.open(
+        "Assets/Mole Hit.png"
+    ).convert("RGBA")
+
+    mole_image_photo = None
+
+    mole_image_id = container.create_image(
+        0,
+        0,
+        anchor="s",
+        state="hidden"
+    )
+
+    hammer_image_source = Image.open(
+        "Assets/Hammer.png"
+    ).convert("RGBA")
+
+    hammer_image_photo = None
+    hammer_image_size = None
+    hammer_frame_photos = []
+    hammer_frame_index = 0
+    hammer_animation_timer = None
+    hammer_image_id = container.create_image(
+        0,
+        0,
+        anchor="nw",
+        state="hidden"
+    )
 
     holes = []
     for r in range(GRID_ROWS):
@@ -543,27 +1271,22 @@ def poll_mouse():
         # the gameplay area
         if 0 <= px <= width and 0 <= py <= height:
 
-            # Convert pixels into the 1.5m x 1.4m
-            # physical play-space coordinates
-            cursor_x_m, cursor_y_m = pixel_to_metres(px, py)
+            physical_position = canvas_to_metres(px, py)
 
-            coord_label.config(
-                text=f"x={cursor_x_m:.2f}m y={cursor_y_m:.2f}m"
+            if physical_position is not None:
+
+                cursor_x_m, cursor_y_m = physical_position
+
+                coord_label.config(
+                    text=f"x={cursor_x_m:.2f}m y={cursor_y_m:.2f}m"
             )
 
-            print(
-                f"cursor px=({px}, {py})  "
-                f"m=({cursor_x_m:.2f}, {cursor_y_m:.2f})"
-            )
+                update_cursor_indicator()
+                draw_hammer_sprite()
+                check_whack()
 
-            update_cursor_indicator()
-
-            # Check whether the current position
-            # is close enough to the active mole
-            check_whack()
-
-    # Check mouse position again in 20 ms
-    root.after(20, poll_mouse)
+    # Check mouse position again in 5 ms
+    root.after(5, poll_mouse)
 # -------------------------
 # Schedule Next Mole
 # -------------------------
@@ -589,9 +1312,10 @@ def schedule_next_mole():
 # -------------------------
 
 def show_mole():
-
     global mole
     global mole_timer
+    global mole_state
+    global mole_visible_fraction
 
     if not game_running:
         return
@@ -600,60 +1324,51 @@ def show_mole():
     # Make sure there isn't already a mole
     if mole is not None:
         return
+
     if not holes:
         schedule_next_mole()
         return
+
     # Pick random hole
     mole = random.choice(holes)
-    draw_hole(mole)
 
-    # Decide how long mole stays up
-    min_time, max_time = difficulty_settings[current_difficulty]["up_time"]
+    mole_state = "rising"
+    mole_visible_fraction = 0.0
+    mole_timer = None
 
-    time_up = random.randint(
-        min_time,
-        max_time
-    )
-
-    # Start mole's timer
-    mole_timer = root.after(
-        time_up,
-        hide_mole
-    )
-    check_whack()
+    animate_mole_rise()
 
 # -------------------------
 # Hide Mole
 # -------------------------
 
 def hide_mole():
-
-    global mole
     global mole_timer
     global combo
 
+    if mole is None:
+        return
+
+    if mole_state != "active":
+        return
+
     # If the mole disappears without being hit,
     # the player's combo is broken
-    if mole is not None:
+    combo = 0
 
-        combo = 0
+    # Recalculate difficulty after combo is reset
+    update_difficulty()
 
-        # Recalculate difficulty after combo is reset
-        update_difficulty()
+    # Update the display
+    score_label.config(
+        text=f"Score: {score} | Combo: {combo} | Level: {current_difficulty}"
+    )
 
-        # Update the display
-        score_label.config(
-            text=f"Score: {score} | Combo: {combo} | Level: {current_difficulty}"
-        )
-
-        old_mole = mole
-        mole = None
-        draw_hole(old_mole)
+    draw_hud()
 
     mole_timer = None
 
-    # Schedule ONE new mole
-    schedule_next_mole()
+    start_mole_fall()
 
 
 # -------------------------
@@ -666,9 +1381,15 @@ def check_whack():
     global combo
     global mole
     global mole_timer
+    global mole_state
+    global mole_visible_fraction
+    global mole_animation_timer
+    global successful_hits
+    global mole_active_started_at
+    global mole_active_duration_ms
 
-    # No mole = nothing to hit
-    if mole is None:
+    # Only a fully raised, active mole can be hit
+    if mole is None or mole_state != "active":
         return
 
     mole_x_m = mole["x_m"]
@@ -676,13 +1397,39 @@ def check_whack():
     dx = cursor_x_m - mole_x_m
     dy = cursor_y_m - mole_y_m
     distance_m = (dx*dx+dy*dy)**0.5
+
     if distance_m <= WHACK_RADIUS_M:
-    # Check whether click hit the mole
-    
+        # Check how quickly the active mole was hit.
+        elapsed_ms = (
+            time.monotonic() -
+            mole_active_started_at
+        ) * 1000
 
+        if mole_active_duration_ms > 0:
+            reaction_fraction = (
+                elapsed_ms /
+                mole_active_duration_ms
+            )
+        else:
+            reaction_fraction = 1.0
 
-        # Increase score after a successful hit
-        score += 1
+        reaction_fraction = max(
+            0.0,
+            min(1.0, reaction_fraction)
+        )
+
+        # Faster hits award more points.
+        if reaction_fraction <= 0.25:
+            points_earned = 100
+        elif reaction_fraction <= 0.50:
+            points_earned = 75
+        elif reaction_fraction <= 0.75:
+            points_earned = 50
+        else:
+            points_earned = 25
+
+        score += points_earned
+        successful_hits += 1
 
         # Increase combo after a consecutive successful hit
         combo += 1
@@ -695,20 +1442,26 @@ def check_whack():
             text=f"Score: {score} | Combo: {combo} | Level: {current_difficulty}"
         )
 
+        draw_hud()
+
         # IMPORTANT:
         # Cancel the mole's existing timer
         if mole_timer is not None:
-
             root.after_cancel(mole_timer)
             mole_timer = None
 
-        # Make mole go down immediately
-        old_mole = mole
-        mole = None
-        draw_hole(old_mole)
+        start_hammer_strike()
 
-        # Schedule ONE new mole
-        schedule_next_mole()
+        # Show the hit sprite before the mole falls
+        mole_state = "hit"
+        mole_visible_fraction = 1.0
+
+        draw_mole_sprite()
+
+        mole_animation_timer = root.after(
+            MOLE_HIT_DURATION_MS,
+            start_mole_fall
+        )
 
 def update_cursor_indicator():
     if not holes or not game_running:
@@ -742,6 +1495,7 @@ def tick_round_timer():
     if not game_running:
         return
     timer_label.config(text=f"Time: {time_remaining}s")
+    draw_hud()
     if time_remaining <= 0:
         end_round()
         return
@@ -754,20 +1508,42 @@ def end_round():
     global mole_timer
     global next_mole_timer
     global round_timer_id
+    global mole_animation_timer
+    global mole_state
+    global mole_visible_fraction
+    global hammer_animation_timer
+    global hammer_frame_index
+
     game_running = False
+
     if mole_timer is not None:
         root.after_cancel(mole_timer)
         mole_timer = None
+
     if next_mole_timer is not None:
         root.after_cancel(next_mole_timer)
         next_mole_timer = None
+
     if round_timer_id is not None:
         root.after_cancel(round_timer_id)
         round_timer_id = None
+
+    if mole_animation_timer is not None:
+        root.after_cancel(mole_animation_timer)
+        mole_animation_timer = None
+
+    if hammer_animation_timer is not None:
+        root.after_cancel(hammer_animation_timer)
+        hammer_animation_timer = None
+
+    hammer_frame_index = 0
+
     if mole is not None:
-        old_mole = mole
         mole = None
-        draw_hole(old_mole)
+        mole_state = "hidden"
+        mole_visible_fraction = 0.0
+        draw_mole_sprite()
+
     show_game_over()
 
 # -------------------------
@@ -824,6 +1600,12 @@ def return_to_menu(event=None):
     global mole_timer
     global next_mole_timer
     global round_timer_id
+    global mole_animation_timer
+    global mole_state
+    global mole_visible_fraction
+    global hammer_animation_timer
+    global hammer_frame_index
+
     # Stop the game
     game_running = False
 
@@ -832,19 +1614,29 @@ def return_to_menu(event=None):
         root.after_cancel(mole_timer)
         mole_timer = None
 
-    if next_mole_timer is not None:
-        root.after_cancel(next_mole_timer)
-        next_mole_timer = None
-        
     if round_timer_id is not None:
         root.after_cancel(round_timer_id)
         round_timer_id = None
 
-    # Remove the current mole
+    if next_mole_timer is not None:
+        root.after_cancel(next_mole_timer)
+        next_mole_timer = None
+
+    if mole_animation_timer is not None:
+        root.after_cancel(mole_animation_timer)
+        mole_animation_timer = None
+
+    if hammer_animation_timer is not None:
+        root.after_cancel(hammer_animation_timer)
+        hammer_animation_timer = None
+
+    hammer_frame_index = 0
+
     if mole is not None:
-        old_mole = mole
         mole = None
-        draw_hole(old_mole)
+        mole_state = "hidden"
+        mole_visible_fraction = 0.0
+        draw_mole_sprite()
 
     # Return to start menu
     start_menu()
@@ -859,5 +1651,5 @@ root.bind("<Escape>", return_to_menu)
 root.bind("<F11>", toggle_fullscreen)
 
 root.after(50, poll_sensor)
-root.after(20, poll_mouse)
+root.after(5, poll_mouse)
 root.mainloop()
