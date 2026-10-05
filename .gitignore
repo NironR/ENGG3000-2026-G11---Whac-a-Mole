@@ -15,3 +15,6 @@ Whack-a-Mole.spec
 run.bat
 boxes.py
 tempCodeRunnerFile.py
+
+# Leaderboard
+leaderboard.json
