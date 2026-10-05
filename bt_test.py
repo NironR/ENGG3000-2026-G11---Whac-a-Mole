@@ -1,3 +1,4 @@
+import statistics
 import sys
 import time
 
@@ -18,9 +19,16 @@ for box_id, port in enumerate(ports, 1):
         continue
     with ser:
         print(f"Opened {port}.")
+        round_trips = []
         for i in range(10):
             ser.reset_input_buffer()
+            sent_at = time.perf_counter()
             ser.write(b"?")                     # any byte means "your turn"
             reply = ser.readline().decode("utf-8", errors="ignore").strip()
-            print(f"{i + 1:>2}: {reply or '(no reply)'}")
+            ms = (time.perf_counter() - sent_at) * 1000
+            if reply:
+                round_trips.append(ms)
+            print(f"{i + 1:>2}: {reply or '(no reply)':<40} {ms:4.0f} ms")
             time.sleep(0.2)
+        if round_trips:
+            print(f"    typical round trip: {statistics.median(round_trips):.0f} ms")

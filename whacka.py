@@ -1,3 +1,4 @@
+import math
 import threading
 import tkinter as tk
 import random
@@ -139,10 +140,10 @@ def display_leaderboard(parent):
 # waiting time between moles, and speed up the rise and fall animations.
 difficulty_settings = {
     "Easy": {
-        "up_time": (900, 1200),
-        "wait_time": (700, 1000),
-        "rise_time": 180,
-        "fall_time": 160
+        "up_time": (2000, 2600),
+        "wait_time": (1100, 1500),
+        "rise_time": 300,
+        "fall_time": 260
     },
     "Medium": {
         "up_time": (600, 900),
@@ -932,14 +933,20 @@ DEAD_ZONE_MM = 600           # spec v2.1: alarm when within 60cm of the screen
 BOX_WALL_OFFSET_MM = 0       # how far the boxes sit out from the screen wall - measure and set
 WARNING_DISTANCE_MM = DEAD_ZONE_MM - BOX_WALL_OFFSET_MM  # the same limit, as the boxes see it
 warning_beep_interval = 0.5  # seconds, stops the beep machine-gunning
-COLUMN_STICKINESS_MM = 150   # another box must be this much closer to steal the column
+COLUMN_STICKINESS_MM = 50
+ROW_HYSTERESIS_M = 0.08
 
 sensor_near_mm = WARNING_DISTANCE_MM
 sensor_far_mm = sensor_near_mm + ROOM_HEIGHT_M * 1000
-CURSOR_SMOOTHING = 0.4
 MAX_MISSES = 3
+JUMP_MM = 300
+CURSOR_STILL_HZ = 1.0
+CURSOR_MOVE_GAIN = 5.0
+FRAME_MS = 16
+USE_TRILATERATION = False
 
 latest_by_box = {}       # BOX_ID -> distance in mm, or None when that box sees nobody
+pending_by_box = {}
 box_links = {box_id: None for box_id in BOX_IDS} if serial_available else {}
 distance_lock = threading.Lock()
 active_box_id = None     # which box currently owns the cursor
@@ -950,7 +957,10 @@ warning_label = None
 def read_reading(ser, box_id):
     """One DIST reply from this box, or None. Skips WARNING and any stray line."""
     for _ in range(4):
-        parts = ser.readline().decode("utf-8", errors="ignore").split()
+        line = ser.readline()
+        if not line:
+            return None
+        parts = line.decode("utf-8", errors="ignore").split()
         if len(parts) >= 3 and parts[0] == str(box_id) and parts[1] == "DIST":
             try:
                 return int(parts[2])
@@ -971,6 +981,74 @@ def connect_box(box_id, retry_after, connecting):
         print(f"Box {box_id} unavailable on {port_name}: {e}")
     finally:
         connecting.discard(box_id)
+
+
+_NOTHING_PENDING = object()
+
+
+def same_spot(a, b):
+    if a is None or b is None:
+        return a is None and b is None
+    return abs(a - b) < JUMP_MM
+
+
+def settle(box_id, reading):
+    current = latest_by_box.get(box_id)
+    pending = pending_by_box.pop(box_id, _NOTHING_PENDING)
+    if same_spot(reading, current):
+        return reading
+    if current is None and reading is not None and any(
+            same_spot(reading, d) for b, d in latest_by_box.items()
+            if b != box_id and d is not None):
+        return reading
+    if pending is not _NOTHING_PENDING and same_spot(reading, pending):
+        return reading
+    pending_by_box[box_id] = reading
+    return current
+
+
+class OneEuroFilter:
+    def __init__(self, min_cutoff_hz, speed_gain, deriv_cutoff_hz=1.0):
+        self.min_cutoff_hz = min_cutoff_hz
+        self.speed_gain = speed_gain
+        self.deriv_cutoff_hz = deriv_cutoff_hz
+        self.value = None
+        self.speed = 0.0
+
+    @staticmethod
+    def _alpha(cutoff_hz, dt):
+        tau = 1 / (2 * math.pi * cutoff_hz)
+        return 1 / (1 + tau / dt)
+
+    def __call__(self, target, dt):
+        if self.value is None or dt <= 0:
+            self.value = target
+            return target
+        raw_speed = (target - self.value) / dt
+        self.speed += self._alpha(self.deriv_cutoff_hz, dt) * (raw_speed - self.speed)
+        cutoff = self.min_cutoff_hz + self.speed_gain * abs(self.speed)
+        self.value += self._alpha(cutoff, dt) * (target - self.value)
+        return self.value
+
+
+snapped_row = None
+
+
+def snap_to_hole(x_m, y_m):
+    global snapped_row
+    row, col = get_grid_cell(x_m, y_m)
+    row_h = ROOM_HEIGHT_M / GRID_ROWS
+    if snapped_row is not None and row != snapped_row:
+        boundary = (snapped_row + (1 if row > snapped_row else 0)) * row_h
+        if abs(y_m - boundary) < ROW_HYSTERESIS_M:
+            row = snapped_row
+    snapped_row = row
+    return (col + 0.5) * (ROOM_WIDTH_M / GRID_COLS), (row + 0.5) * row_h
+
+
+cursor_filter_x = OneEuroFilter(CURSOR_STILL_HZ, CURSOR_MOVE_GAIN)
+cursor_filter_y = OneEuroFilter(CURSOR_STILL_HZ, CURSOR_MOVE_GAIN)
+last_frame_at = time.monotonic()
 
 
 def serial_thread():
@@ -1014,8 +1092,9 @@ def serial_thread():
             else:
                 misses[box_id] = 0
 
+            reading = settle(box_id, reading if reading is not None and reading >= 0 else None)
             with distance_lock:
-                latest_by_box[box_id] = reading if reading is not None and reading >= 0 else None
+                latest_by_box[box_id] = reading
 
         time.sleep(0.01)   # nothing answered: don't spin the CPU
 
@@ -1041,12 +1120,12 @@ def pick_box(seen, current):
 
 assert pick_box({}, None) is None
 assert pick_box({1: 900, 2: 800}, None) == 2   # nobody owns it yet: nearest wins
-assert pick_box({1: 900, 2: 800}, 1) == 1      # 100mm closer isn't enough to steal it
-assert pick_box({1: 900, 2: 700}, 1) == 2      # 200mm closer is
+assert pick_box({1: 900, 2: 870}, 1) == 1
+assert pick_box({1: 900, 2: 800}, 1) == 2
 assert pick_box({1: 900, 2: 800}, 3) == 2      # owner dropped out: nearest wins
 
 
-MIRROR_BOXES = True   # box 1 sits on the right of the screen (as the player sees it)
+MIRROR_BOXES = True
 
 
 def box_x_mm(box_id):
@@ -1129,20 +1208,21 @@ def proximity_alarm(too_close):
 
 
 def poll_sensor():
-    global cursor_x_m, cursor_y_m, active_box_id
+    global cursor_x_m, cursor_y_m, active_box_id, last_frame_at
+
+    now = time.monotonic()
+    dt, last_frame_at = now - last_frame_at, now
 
     with distance_lock:
         seen = {box_id: d for box_id, d in latest_by_box.items()
                 if d is not None and d <= sensor_far_mm}
 
-    # Only during a round: in the menus nobody is playing, so someone walking
-    # up to the screen to press Start would trip it.
     proximity_alarm(game_running and in_dead_zone(seen))
 
     box_id = pick_box(seen, active_box_id)
     if box_id is not None and game_running:
         active_box_id = box_id
-        spot = trilaterate(seen, box_id)
+        spot = trilaterate(seen, box_id) if USE_TRILATERATION else None
         if spot is not None:
             # Two or more boxes see you: their distances pin down x as well as y.
             target_x = max(0.0, min(ROOM_WIDTH_M, spot[0] / 1000))
@@ -1154,15 +1234,16 @@ def poll_sensor():
             target_y = distance_to_metres(seen[box_id])
             source = f"box {box_id}"
 
-        cursor_x_m += CURSOR_SMOOTHING * (target_x - cursor_x_m)
-        cursor_y_m += CURSOR_SMOOTHING * (target_y - cursor_y_m)
+        target_x, target_y = snap_to_hole(target_x, target_y)
+        cursor_x_m = cursor_filter_x(target_x, dt)
+        cursor_y_m = cursor_filter_y(target_y, dt)
 
         coord_label.config(text=f"x={cursor_x_m:.2f}m y={cursor_y_m:.2f}m ({source})")
         update_cursor_indicator()
         draw_hammer_sprite()
         check_whack()
 
-    root.after(50, poll_sensor)
+    root.after(FRAME_MS, poll_sensor)
 
 
 # -------------------------

@@ -1,11 +1,3 @@
-"""Live view of what each sensor box sees, laid over the game grid.
-
-Bench tool, like bt_test.py: run it instead of the game to see why the cursor
-goes where it does. `py sensor_view.py` uses USB (and shows each box's two
-sensors separately); `py sensor_view.py --bt` uses Bluetooth only.
-
-The room numbers below are copied from whacka.py - keep them in step.
-"""
 import threading
 import time
 import tkinter as tk
@@ -22,18 +14,16 @@ WARNING_DISTANCE_MM = 600
 SENSOR_FAR_MM = WARNING_DISTANCE_MM + ROOM_HEIGHT_M * 1000
 MIRROR_BOXES = True
 
-SCALE = 300              # pixels per metre
+SCALE = 300
 PAD = 40
 W = int(ROOM_WIDTH_M * SCALE) + 2 * PAD
 H = int(ROOM_HEIGHT_M * SCALE) + 2 * PAD + 110
 
-# BOX_ID -> {"dist": mm or -1, "d1": mm, "d2": mm, "port": str, "at": time of last reply}
 state = {b: {"dist": None, "d1": None, "d2": None, "port": None, "at": 0.0} for b in BOX_IDS}
 lock = threading.Lock()
 
 
 def parse(line):
-    """"2 DIST 750" over Bluetooth, "2 DIST 750  (d1=740 d2=760)" over USB."""
     parts = line.split()
     if len(parts) < 3 or parts[1] != "DIST" or not parts[0].isdigit():
         return None
@@ -65,7 +55,7 @@ def poll_thread():
             ser = links[b]
             try:
                 ser.reset_input_buffer()
-                ser.write(b"?")    # one box at a time, same as the game
+                ser.write(b"?")
                 reading = parse(ser.readline().decode("utf-8", errors="ignore"))
             except serial.SerialException:
                 ser.close()
@@ -80,13 +70,11 @@ def poll_thread():
 
 
 def mm_to_y_m(mm):
-    """Same mapping as whacka.distance_to_metres."""
     fraction = (mm - WARNING_DISTANCE_MM) / (SENSOR_FAR_MM - WARNING_DISTANCE_MM)
     return max(0.0, min(1.0, fraction)) * ROOM_HEIGHT_M
 
 
 def box_x_m(b):
-    """Same as whacka.box_x_mm, in metres."""
     column = GRID_COLS + 1 - b if MIRROR_BOXES else b
     return (column - 0.5) * ROOM_WIDTH_M / GRID_COLS
 
@@ -103,7 +91,6 @@ def draw():
     with lock:
         snap = {b: dict(s) for b, s in state.items()}
     now = time.monotonic()
-    # What the game counts as "seen": a real reading inside the play area.
     seen = {b: s["dist"] for b, s in snap.items()
             if s["dist"] is not None and 0 <= s["dist"] <= SENSOR_FAR_MM and now - s["at"] < 1}
     winner = min(seen, key=seen.get) if seen else None

@@ -10,6 +10,9 @@ int trigPin1 = 18;
 int echoPin2 = 19;
 int trigPin2 = 21;
 
+const unsigned long ECHO_TIMEOUT_US = 15000;
+const unsigned long ECHO_START_US = 2000;
+
 
 void setup() {
   Serial.begin(115200);
@@ -47,14 +50,14 @@ void loop() {
   // Any byte on either link means "your turn" (USB included, so the Arduino
   // Serial Monitor can drive a bench test without the PC game running).
   if (!SerialBT.available() && !Serial.available()) {
-    delay(5);  // yield: without this the BT stack starves and the link drops
+    delay(1);  // yield: without this the BT stack starves and the link drops
     return;
   }
   while (SerialBT.available()) SerialBT.read();
   while (Serial.available()) Serial.read();
 
-  long d1 = readUltraSonicDistanceMm(trigPin1, echoPin1);
-  long d2 = readUltraSonicDistanceMm(trigPin2, echoPin2);
+  long d1, d2;
+  readBothDistancesMm(d1, d2);
   long combined = combineReadings(d1, d2);  // -1 = looked, saw nothing
 
   SerialBT.println(String(BOX_ID) + " DIST " + String(combined));
@@ -76,23 +79,38 @@ long combineReadings(long d1, long d2) {
   }
 }
 
-long readUltraSonicDistanceMm(int trigPin, int echoPin) {
-  // Trigger the ultrasonic sensor
-  // Set the trigPin low for a short period to ensure a clean signal
-  
-  digitalWrite(trigPin, LOW);
+void readBothDistancesMm(long &d1, long &d2) {
+  digitalWrite(trigPin1, LOW);
+  digitalWrite(trigPin2, LOW);
   delayMicroseconds(2);
-  digitalWrite(trigPin, HIGH);
+  digitalWrite(trigPin1, HIGH);
+  digitalWrite(trigPin2, HIGH);
   delayMicroseconds(10);
-  digitalWrite(trigPin, LOW);
+  digitalWrite(trigPin1, LOW);
+  digitalWrite(trigPin2, LOW);
 
-  long duration = pulseIn(echoPin, HIGH, 30000); // Wait for the echo, with a timeout of 30ms
+  unsigned long started = micros();
+  unsigned long rose1 = 0, rose2 = 0;
+  bool risen1 = false, risen2 = false;
+  d1 = -1;
+  d2 = -1;
 
-  if (duration == 0) {
-    // No echo received (timeout)
-    return -1; // Indicate an error
+  while (micros() - started < ECHO_START_US + ECHO_TIMEOUT_US) {
+    unsigned long now = micros();
+    bool high1 = digitalRead(echoPin1);
+    bool high2 = digitalRead(echoPin2);
+
+    if (!risen1 && high1) { risen1 = true; rose1 = now; }
+    else if (risen1 && d1 < 0 && !high1) d1 = echoToMm(now - rose1);
+
+    if (!risen2 && high2) { risen2 = true; rose2 = now; }
+    else if (risen2 && d2 < 0 && !high2) d2 = echoToMm(now - rose2);
+
+    if (d1 >= 0 && d2 >= 0) break;
   }
+}
 
-  long distanceMm = duration * 0.343 / 2; // Speed of sound is ~343 m/s
-  return distanceMm;
+long echoToMm(unsigned long roundTripUs) {
+  if (roundTripUs > ECHO_TIMEOUT_US) return -1;
+  return roundTripUs * 0.343 / 2;
 }
