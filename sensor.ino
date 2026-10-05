@@ -15,7 +15,7 @@ void setup() {
   Serial.begin(115200);
   delay(100);
 
-  // On battery this line is the whole diagnosis. Reason 15 (ESP_RST_BROWNOUT)
+  // On battery this line is the whole diagnosis.
   // means the pack sagged below what the chip needs - almost always when the
   // Bluetooth radio switched on and took its first big gulp of current. No
   // amount of firmware fixes that; it needs a steadier supply.
