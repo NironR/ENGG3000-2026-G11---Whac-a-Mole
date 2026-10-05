@@ -1253,12 +1253,12 @@ def show_countdown(on_complete):
 # Begin Round (after the countdown)
 # -------------------------
 def begin_round():
-    global game_running, time_remaining, time_remaining, rounder_timer_id
+    global game_running, time_remaining, round_timer_id
     game_running = True
     time_remaining = ROUND_DURATION
     schedule_next_mole()
     update_cursor_indicator()
-    rounder_timer_id = root.after(1000, tick_round_timer)
+    round_timer_id = root.after(1000, tick_round_timer)
 # -------------------------
 # Create Game
 # -------------------------
