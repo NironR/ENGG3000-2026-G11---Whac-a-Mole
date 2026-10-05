@@ -1376,7 +1376,9 @@ def create_game():
             holes.append({
                 "row": r,
                 "col": c,
-                "canvas_id": canvas_id
+                "canvas_id": canvas_id,
+                "x_m": (c + 0.5) * (ROOM_WIDTH_M / GRID_COLS),
+                "y_m": (r + 0.5) * (ROOM_HEIGHT_M / GRID_ROWS)
             })
 
     coord_label = tk.Label(
