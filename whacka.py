@@ -52,8 +52,9 @@ round_timer_id = None
 # -------------------------
 # Round Timer
 # -------------------------
-ROUND_DURATION = 10 #Timer in seconds
-time_remaining = ROUND_DURATION
+ROUND_DURATION = 60 #Timer in seconds
+time_remaining = ROUND_DURATION;
+HIT_TIME_BONUS = 1;
 
 # -------------------------
 # Leaderboard System
@@ -1252,12 +1253,12 @@ def show_countdown(on_complete):
 # Begin Round (after the countdown)
 # -------------------------
 def begin_round():
-    global game_running, time_remaining
+    global game_running, time_remaining, time_remaining, rounder_timer_id
     game_running = True
     time_remaining = ROUND_DURATION
     schedule_next_mole()
     update_cursor_indicator()
-    tick_round_timer()
+    rounder_timer_id = root.after(1000, tick_round_timer)
 # -------------------------
 # Create Game
 # -------------------------
@@ -1427,6 +1428,9 @@ def poll_mouse():
 
             physical_position = canvas_to_metres(px, py)
 
+            if mole is not None and mole_image_id in container.find_overlapping(px, py, px, py):
+                physical_position = (mole["x_m"], mole["y_m"])
+
             if physical_position is not None:
 
                 cursor_x_m, cursor_y_m = physical_position
@@ -1483,8 +1487,12 @@ def show_mole():
         schedule_next_mole()
         return
 
-    # Pick random hole
-    mole = random.choice(holes)
+    # Pick random hole; never spawns under player grid.
+    cursor_cell = get_grid_cell(cursor_x_m, cursor_y_m)
+    mole = random.choice([
+        h for h in holes
+        if (h["row"], h["col"]) != cursor_cell
+    ])
 
     mole_state = "rising"
     mole_visible_fraction = 0.0
@@ -1541,6 +1549,7 @@ def check_whack():
     global successful_hits
     global mole_active_started_at
     global mole_active_duration_ms
+    global time_remaining
 
     # Only a fully raised, active mole can be hit
     if mole is None or mole_state != "active":
@@ -1582,11 +1591,14 @@ def check_whack():
         else:
             points_earned = 25
 
-        score += points_earned
+        score += points_earned * get_hit_points()
         successful_hits += 1
 
         # Increase combo after a consecutive successful hit
         combo += 1
+
+        # Increase the remaining time by the hit time bonus, but do not exceed the maximum round duration
+        time_remaining = min(ROUND_DURATION, time_remaining + HIT_TIME_BONUS)
 
         # Calculate points based on the current combo
         points = get_hit_points()
@@ -1654,12 +1666,12 @@ def tick_round_timer():
     global round_timer_id, time_remaining
     if not game_running:
         return
+    time_remaining -= 1
     timer_label.config(text=f"Time: {time_remaining}s")
     draw_hud()
     if time_remaining <= 0:
         end_round()
         return
-    time_remaining -= 1
     round_timer_id = root.after(1000, tick_round_timer)
     
 def end_round():
