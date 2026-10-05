@@ -1,6 +1,7 @@
 import threading
 import tkinter as tk
 import random
+import statistics
 import time
 from PIL import Image, ImageTk
 
@@ -17,6 +18,7 @@ except ImportError:
 #-------------------------
 try:
     import serial
+    from boxes import BOX_BT_ADDRS, find_port
     serial_available = True
 except ImportError:
     serial_available = False
@@ -828,11 +830,6 @@ def redraw_playfield(event=None):
 # themselves this needs no shared clock - three ESP32s booted at different
 # moments never agree on when a slot begins.
 
-box_ports = {          # BOX_ID -> COM port. Box 1 is the left column, 3 the right.
-    1: "COM6",
-    2: "COM7",
-    3: "COM8",
-}
 baud_rate = 115200
 poll_timeout_s = 0.1   # a box answers well inside this; a missing one costs this much
 port_retry_s = 3.0     # don't stall the sweep retrying a box that isn't plugged in
@@ -843,12 +840,13 @@ WARNING_DISTANCE_MM = DEAD_ZONE_MM - BOX_WALL_OFFSET_MM  # the same limit, as th
 warning_beep_interval = 0.5  # seconds, stops the beep machine-gunning
 COLUMN_STICKINESS_MM = 150   # another box must be this much closer to steal the column
 
-# TODO: calibrate against real measured bench-test readings (mm), once done, replace placeholder values w real readings
-# when a person stands at the near edge of the play zone, and the far edge.
-sensor_near_mm = 100 # placeholder value, change to real measured reading
-sensor_far_mm = 1400 # placeholder value, change to real measured reading
+sensor_near_mm = WARNING_DISTANCE_MM
+sensor_far_mm = sensor_near_mm + ROOM_HEIGHT_M * 1000
+CURSOR_SMOOTHING = 0.4
+MAX_MISSES = 3
 
 latest_by_box = {}       # BOX_ID -> distance in mm, or None when that box sees nobody
+box_links = {box_id: None for box_id in BOX_BT_ADDRS} if serial_available else {}
 distance_lock = threading.Lock()
 active_box_id = None     # which box currently owns the cursor
 last_warning_beep = 0.00
@@ -861,11 +859,24 @@ def read_reading(ser, box_id):
         parts = ser.readline().decode("utf-8", errors="ignore").split()
         if len(parts) == 3 and parts[0] == str(box_id) and parts[1] == "DIST":
             try:
-                value = int(parts[2])
+                return int(parts[2])
             except ValueError:
                 return None
-            return value if value >= 0 else None   # -1 = box looked, saw nothing
     return None
+
+
+def connect_box(box_id, retry_after, connecting):
+    port_name = find_port(box_id)
+    try:
+        if port_name is None:
+            raise serial.SerialException("not paired with this PC")
+        box_links[box_id] = serial.Serial(port_name, baud_rate, timeout=poll_timeout_s)
+        print(f"Box {box_id} connected on {port_name}.")
+    except serial.SerialException as e:
+        retry_after[box_id] = time.monotonic() + port_retry_s
+        print(f"Box {box_id} unavailable on {port_name}: {e}")
+    finally:
+        connecting.discard(box_id)
 
 
 def serial_thread():
@@ -873,39 +884,44 @@ def serial_thread():
         print("pySerial not available. Serial communication disabled.")
         return
 
-    ports = {box_id: None for box_id in box_ports}
-    retry_after = {box_id: 0.0 for box_id in box_ports}
+    retry_after = {box_id: 0.0 for box_id in BOX_BT_ADDRS}
+    misses = {box_id: 0 for box_id in BOX_BT_ADDRS}
+    connecting = set()
 
     while True:
-        for box_id, port_name in box_ports.items():
-            if ports[box_id] is None:
-                if time.monotonic() < retry_after[box_id]:
-                    continue
-                try:
-                    ports[box_id] = serial.Serial(port_name, baud_rate, timeout=poll_timeout_s)
-                    print(f"Box {box_id} connected on {port_name}.")
-                except serial.SerialException as e:
-                    retry_after[box_id] = time.monotonic() + port_retry_s
-                    print(f"Box {box_id} unavailable on {port_name}: {e}")
-                    continue
+        for box_id in BOX_BT_ADDRS:
+            if box_links[box_id] is None:
+                if box_id not in connecting and time.monotonic() >= retry_after[box_id]:
+                    connecting.add(box_id)
+                    threading.Thread(target=connect_box, args=(box_id, retry_after, connecting),
+                                     daemon=True).start()
+                continue
 
             try:
-                ser = ports[box_id]
+                ser = box_links[box_id]
                 ser.reset_input_buffer()
                 ser.write(b"?")        # any byte means "your turn"
                 reading = read_reading(ser, box_id)
             except serial.SerialException:
                 print(f"Lost box {box_id} - will retry")
                 try:
-                    ports[box_id].close()
+                    box_links[box_id].close()
                 except Exception:
                     pass
-                ports[box_id] = None
+                box_links[box_id] = None
                 retry_after[box_id] = time.monotonic() + port_retry_s
                 reading = None
+                misses[box_id] = MAX_MISSES
+
+            if reading is None:
+                misses[box_id] += 1
+                if misses[box_id] < MAX_MISSES:
+                    continue
+            else:
+                misses[box_id] = 0
 
             with distance_lock:
-                latest_by_box[box_id] = reading
+                latest_by_box[box_id] = reading if reading is not None and reading >= 0 else None
 
         time.sleep(0.01)   # nothing answered: don't spin the CPU
 
@@ -934,6 +950,42 @@ assert pick_box({1: 900, 2: 800}, None) == 2   # nobody owns it yet: nearest win
 assert pick_box({1: 900, 2: 800}, 1) == 1      # 100mm closer isn't enough to steal it
 assert pick_box({1: 900, 2: 700}, 1) == 2      # 200mm closer is
 assert pick_box({1: 900, 2: 800}, 3) == 2      # owner dropped out: nearest wins
+
+
+def box_x_mm(box_id):
+    return (box_id - 0.5) * (ROOM_WIDTH_M / GRID_COLS) * 1000
+
+
+def trilaterate(seen, anchor_id):
+    anchor_x = box_x_mm(anchor_id)
+    # Only the anchor's neighbours: two objects in front of boxes 1 and 3 would
+    ids = [k for k in seen
+           if k == anchor_id
+           or (abs(k - anchor_id) == 1
+               and abs(seen[k] - seen[anchor_id]) < abs(box_x_mm(k) - anchor_x))]
+    if len(ids) < 2:
+        return None
+    slope, intercept = statistics.linear_regression(
+        [box_x_mm(k) for k in ids],
+        [seen[k] ** 2 - box_x_mm(k) ** 2 for k in ids],
+    )
+    x = -slope / 2
+    if intercept < x * x:
+        return None
+    return x, (intercept - x * x) ** 0.5
+
+
+def _ranges_to(x, y):
+    return {k: round(((x - box_x_mm(k)) ** 2 + y * y) ** 0.5) for k in (1, 2, 3)}
+
+
+_spot = trilaterate(_ranges_to(500, 1300), 1)                   
+assert abs(_spot[0] - 500) < 5 and abs(_spot[1] - 1300) < 5
+_spot = trilaterate({**_ranges_to(500, 1300), 1: 550}, 2)       
+assert abs(_spot[0] - 500) < 5 and abs(_spot[1] - 1300) < 5
+assert trilaterate({2: 1300}, 2) is None                          
+assert trilaterate({1: 550, 2: 1300}, 2) is None                  
+assert trilaterate({1: 565, 2: 2210, 3: 545}, 3) is None          
 
 
 def in_dead_zone(seen):
@@ -982,21 +1034,31 @@ def poll_sensor():
     global cursor_x_m, cursor_y_m, active_box_id
 
     with distance_lock:
-        seen = {box_id: d for box_id, d in latest_by_box.items() if d is not None}
+        seen = {box_id: d for box_id, d in latest_by_box.items()
+                if d is not None and d <= sensor_far_mm}
 
     # Alarm is a safety feature - it fires whether or not a game is running.
     proximity_alarm(in_dead_zone(seen))
 
     box_id = pick_box(seen, active_box_id)
     if box_id is not None and game_running:
-        distance = seen[box_id]
         active_box_id = box_id
-        # BOX_ID is the column: which box sees you is your left/centre/right cell,
-        # and that box's distance is how far down the grid you are.
-        cursor_x_m = (box_id - 0.5) * (ROOM_WIDTH_M / GRID_COLS)
-        cursor_y_m = distance_to_metres(distance)
+        spot = trilaterate(seen, box_id)
+        if spot is not None:
+            # Two or more boxes see you: their distances pin down x as well as y.
+            target_x = max(0.0, min(ROOM_WIDTH_M, spot[0] / 1000))
+            target_y = distance_to_metres(spot[1])
+            source = "trilateration"
+        else:
+            # is how far down the grid you are.
+            target_x = box_x_mm(box_id) / 1000
+            target_y = distance_to_metres(seen[box_id])
+            source = f"box {box_id}"
 
-        coord_label.config(text=f"x={cursor_x_m:.2f}m y={cursor_y_m:.2f}m (box {box_id})")
+        cursor_x_m += CURSOR_SMOOTHING * (target_x - cursor_x_m)
+        cursor_y_m += CURSOR_SMOOTHING * (target_y - cursor_y_m)
+
+        coord_label.config(text=f"x={cursor_x_m:.2f}m y={cursor_y_m:.2f}m ({source})")
         update_cursor_indicator()
         draw_hammer_sprite()
         check_whack()
@@ -1209,9 +1271,6 @@ def create_game():
     holes = []
     for r in range(GRID_ROWS):
         for c in range(GRID_COLS):
-            hole_x_m = (c + 0.5) * (ROOM_WIDTH_M / GRID_COLS)
-            hole_y_m = (r + 0.5) * (ROOM_HEIGHT_M / GRID_ROWS)
-
             canvas_id = container.create_rectangle(
                 0,
                 0,
@@ -1224,8 +1283,6 @@ def create_game():
             holes.append({
                 "row": r,
                 "col": c,
-                "x_m": hole_x_m,
-                "y_m": hole_y_m,
                 "canvas_id": canvas_id
             })
 
@@ -1249,7 +1306,9 @@ def create_game():
 def poll_mouse():
     global cursor_x_m, cursor_y_m
 
-    if game_running:
+    sensors_connected = any(link is not None for link in box_links.values())
+
+    if game_running and not sensors_connected:
 
         # Get mouse position on the whole screen
         mouse_x = root.winfo_pointerx()
