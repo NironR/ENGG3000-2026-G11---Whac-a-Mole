@@ -1591,7 +1591,6 @@ def check_whack():
         else:
             points_earned = 25
 
-        score += points_earned * get_hit_points()
         successful_hits += 1
 
         # Increase combo after a consecutive successful hit
@@ -1600,11 +1599,8 @@ def check_whack():
         # Increase the remaining time by the hit time bonus, but do not exceed the maximum round duration
         time_remaining = min(ROUND_DURATION, time_remaining + HIT_TIME_BONUS)
 
-        # Calculate points based on the current combo
-        points = get_hit_points()
-
-        # Add the awarded points to the total score
-        score += points
+        # Combo multiplies the reaction-time points (x1, x2, x3)
+        score += points_earned * get_hit_points()
 
         # Check whether the difficulty level should increase
         update_difficulty()
