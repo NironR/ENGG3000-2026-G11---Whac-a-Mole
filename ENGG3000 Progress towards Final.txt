@@ -1,0 +1,37 @@
+Box:
+	Fixed Position
+	Antenna Box Slot
+	Box 2 convert mini threadboard
+
+Program & Code
+	Convert to EXE.
+	Optimisation
+
+Firmware:
+	Latency issues
+	Noise issues 
+	Optimisation
+	
+UI & Graphic Desgin
+	Overall Menu Design
+		Set of Instruction
+
+Gameplay
+	Dynamic Difficulty (Primtiive) 
+	Debuffs & Buffs	
+		Beer - Mirrored
+		Multipliers ?
+		Iain Mole = Hammer Breaks = Game Over
+	
+Music & SFX
+
+Documentation
+	Manual: 
+		Setup Guide - how to setup.
+		Calibration Guide - how to make it accurate
+	Test Cases
+	Progress Photos
+
+Group Timeline
+	
+Aesthetic
