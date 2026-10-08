@@ -99,6 +99,15 @@ Stepping within 60 cm of the screen sounds an alarm.
 Credit goes to [CocoonAI](https://github.com/Cocoon-AI/architecture-diagram-generator/tree/main) for constructing the diagram of the run-time for Whac-a-Mole.
 
 ## Changelog
+### Unreleased
+#### Planned
+- Packaged `.exe` build of the game.
+- One 4xAA NiMH pack per sensor box, to stop brownout resets when Bluetooth starts.
+- Firmware: move sensor 1's Echo off GPIO5 (a boot strapping pin), and reduce latency and noise.
+- Buffs and debuffs, e.g. a mirrored-controls mole and a hammer-breaking mole that ends the game.
+- Music and sound effects.
+- Setup and calibration guides.
+
 ### 0.3.0 - 2026-10-05
 #### Added
 - Arcade cabinet visuals, mole sprites with rise and hit animations, and a tracked hammer.
