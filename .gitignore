@@ -13,3 +13,11 @@ Whack-a-Mole.spec
 
 # Local dev launcher
 run.bat
+boxes.py
+tempCodeRunnerFile.py
+
+# Leaderboard
+leaderboard.json
+
+#old code
+sensor_old/sensor_old.ino
