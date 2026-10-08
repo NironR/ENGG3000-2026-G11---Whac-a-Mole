@@ -101,7 +101,7 @@ Credit goes to [CocoonAI](https://github.com/Cocoon-AI/architecture-diagram-gene
 ## Changelog
 ### Unreleased
 #### Planned
-- Packaged `.exe` build of the game.
+- Packaged `.exe` build of the game.`````
 - One 4xAA NiMH pack per sensor box, to stop brownout resets when Bluetooth starts.
 - Firmware: move sensor 1's Echo off GPIO5 (a boot strapping pin), and reduce latency and noise.
 - Buffs and debuffs, e.g. a mirrored-controls mole and a hammer-breaking mole that ends the game.
