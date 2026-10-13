@@ -1,0 +1,289 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Whac-a-Mole Week 13 Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one day-per-column Gantt (Tue 13 Oct → Tue 27 Oct), sticky task column, then a week-by-week "finish by" list */
+:root {
+  --bg: #f2f4f1;
+  --surface: #ffffff;
+  --ink: #1b2420;
+  --muted: #5c6862;
+  --line: #dde3de;
+  --weekend: #eceff0;
+  --today: #d4480f;
+  --c-box: #8a5a2b;
+  --c-fw: #17796b;
+  --c-code: #3352b5;
+  --c-play: #b2384a;
+  --c-ui: #7a3ea0;
+  --c-sfx: #a87600;
+  --c-doc: #4b5864;
+  --f-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  --label-w: 15.5rem;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111614; --surface: #19201c; --ink: #e5ebe7; --muted: #9ba7a0;
+    --line: #2b3530; --weekend: #151b18; --today: #ff8a4c;
+    --c-box: #d6a06a; --c-fw: #4cc3ae; --c-code: #8ea6f2; --c-play: #f08b98;
+    --c-ui: #c59ce2; --c-sfx: #e5c053; --c-doc: #a9b5c0;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111614; --surface: #19201c; --ink: #e5ebe7; --muted: #9ba7a0;
+  --line: #2b3530; --weekend: #151b18; --today: #ff8a4c;
+  --c-box: #d6a06a; --c-fw: #4cc3ae; --c-code: #8ea6f2; --c-play: #f08b98;
+  --c-ui: #c59ce2; --c-sfx: #e5c053; --c-doc: #a9b5c0;
+  color-scheme: dark;
+}
+
+body { background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 14px; line-height: 1.45; }
+.wrap { max-width: 1180px; margin: 0 auto; padding-inline: 16px; padding-block: 32px 56px; display: grid; gap: 28px; }
+
+header { display: grid; gap: 6px; }
+.eyebrow { font-family: var(--f-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+h1 { font-family: var(--f-display); font-weight: 800; font-size: clamp(28px, 5vw, 44px); line-height: 1.05; margin: 0; text-wrap: balance; letter-spacing: -0.01em; }
+.sub { color: var(--muted); margin: 0; max-width: 62ch; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 13px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sw { width: 14px; height: 10px; border-radius: 2px; background: var(--c); display: inline-block; }
+.sw.ongoing { background: repeating-linear-gradient(135deg, var(--muted) 0 3px, transparent 3px 6px); border: 1px solid var(--muted); }
+.sw.stretch { background: transparent; border: 1.5px dashed var(--muted); }
+.sw.ms { width: 10px; height: 10px; background: var(--ink); transform: rotate(45deg); border-radius: 1px; }
+.sw.today { width: 2px; height: 14px; background: var(--today); border-radius: 0; }
+
+.scroller { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.gantt { display: grid; grid-template-columns: var(--label-w) repeat(15, minmax(38px, 1fr)); min-width: calc(var(--label-w) + 15 * 38px); position: relative; }
+
+.daybg { border-left: 1px solid var(--line); z-index: 0; }
+.daybg.weekend { background: var(--weekend); }
+.daybg.weekstart { border-left: 1.5px solid var(--muted); }
+.vline { justify-self: center; width: 0; z-index: 1; pointer-events: none; }
+.vline.ms { border-left: 1.5px dashed var(--muted); opacity: .6; }
+.vline.today { border-left: 2px solid var(--today); }
+
+.lab { position: sticky; left: 0; z-index: 3; background: var(--surface); border-right: 1px solid var(--line); padding: 7px 12px; display: flex; flex-direction: column; justify-content: center; min-width: 0; }
+.lab .name { font-weight: 500; }
+.lab .range { font-family: var(--f-mono); font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.wk { z-index: 2; text-align: center; padding: 8px 4px 4px; font-family: var(--f-display); font-weight: 600; font-size: 13px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.wk small { display: block; font-family: var(--f-mono); font-weight: 400; font-size: 10.5px; color: var(--muted); }
+.day { z-index: 2; text-align: center; padding: 4px 0 6px; font-family: var(--f-mono); font-size: 11px; color: var(--muted); line-height: 1.2; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+.day b { display: block; font-size: 13px; color: var(--ink); font-weight: 500; }
+.day.is-today b { color: var(--today); }
+.head-lab { z-index: 4; font-family: var(--f-mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--line); }
+
+.cat { z-index: 3; position: sticky; left: 0; padding: 14px 12px 4px; font-family: var(--f-display); font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 8px; background: transparent; }
+.cat::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--c); }
+.cat-fill { z-index: 2; }
+
+.track { z-index: 2; display: flex; align-items: center; padding-inline: 3px; }
+.bar { height: 16px; width: 100%; border-radius: 4px; background: var(--c); }
+.bar.ongoing { background: repeating-linear-gradient(135deg, var(--c) 0 4px, color-mix(in srgb, var(--c) 35%, transparent) 4px 8px); }
+.bar.stretch { background: color-mix(in srgb, var(--c) 14%, transparent); border: 1.5px dashed var(--c); }
+
+.ms-row-lab .name { font-family: var(--f-display); font-weight: 600; }
+.diamond { z-index: 2; justify-self: center; align-self: center; width: 13px; height: 13px; background: var(--ink); transform: rotate(45deg); border-radius: 2px; }
+.diamond.final { background: var(--today); width: 15px; height: 15px; }
+.ms-top { border-top: 1px solid var(--line); }
+
+.weeks { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+.week { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; display: grid; gap: 10px; align-content: start; min-width: 0; }
+.week h2 { font-family: var(--f-display); font-weight: 800; font-size: 20px; margin: 0; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.week h2 span { font-family: var(--f-mono); font-weight: 400; font-size: 12px; color: var(--muted); }
+.week ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
+.week li { display: grid; grid-template-columns: 4.6rem 1fr; gap: 10px; align-items: baseline; }
+.week .when { font-family: var(--f-mono); font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.week .what { display: flex; gap: 7px; align-items: baseline; min-width: 0; }
+.week .what::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--c); transform: translateY(-1px); }
+.week li.mile .what { font-weight: 600; }
+.week li.mile .what::before { border-radius: 1px; transform: rotate(45deg); background: var(--ink); }
+.week li.mile.final .what::before { background: var(--today); }
+.week .tag { font-size: 11px; color: var(--muted); }
+
+.note { font-size: 13px; color: var(--muted); margin: 0; max-width: 70ch; }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">ENGG3000 · Group 11 · Whac-a-Mole</div>
+    <h1>Road to Week 13</h1>
+    <p class="sub">Every open item from the group list, scheduled day by day from Tuesday 13 October to the Week 13 deadline on Tuesday 27 October 2026.</p>
+  </header>
+
+  <div class="legend" aria-label="Legend">
+    <span><i class="sw" style="--c:var(--c-box)"></i>Box</span>
+    <span><i class="sw" style="--c:var(--c-fw)"></i>Firmware</span>
+    <span><i class="sw" style="--c:var(--c-code)"></i>Program &amp; Code</span>
+    <span><i class="sw" style="--c:var(--c-play)"></i>Gameplay</span>
+    <span><i class="sw" style="--c:var(--c-ui)"></i>UI &amp; Graphic Design</span>
+    <span><i class="sw" style="--c:var(--c-sfx)"></i>Music &amp; SFX</span>
+    <span><i class="sw" style="--c:var(--c-doc)"></i>Documentation</span>
+    <span><i class="sw ongoing"></i>Ongoing</span>
+    <span><i class="sw stretch"></i>Stretch goal</span>
+    <span><i class="sw ms"></i>Milestone</span>
+    <span><i class="sw today"></i>Today</span>
+  </div>
+
+  <div class="scroller"><div class="gantt" id="gantt" role="img" aria-label="Gantt chart of project tasks from 13 to 27 October 2026"></div></div>
+
+  <section class="weeks" id="weeks" aria-label="Items to finish each week"></section>
+
+  <p class="note">Feature freeze on Thursday 22 October leaves the last five days for packaging the EXE, documentation and a full dry run. Firmware calibration finishes before the Calibration Guide is written so the guide matches the final numbers.</p>
+</div>
+
+<script>
+(function () {
+  const FIRST = 13, LAST = 27, DAYS = LAST - FIRST + 1;   // October 2026
+  const WEEKS = [
+    { n: 11, s: 13, e: 18 },
+    { n: 12, s: 19, e: 25 },
+    { n: 13, s: 26, e: 27 },
+  ];
+  const CATS = [
+    { name: "Box", c: "--c-box", tasks: [
+      ["Fixed position mounting", 13, 16],
+      ["Antenna box slot", 13, 16],
+      ["Box 2 → mini threadboard", 15, 21],
+    ]},
+    { name: "Firmware", c: "--c-fw", tasks: [
+      ["Quick fixes: reading merge, blind zone, GPIO5", 13, 15],
+      ["Latency: measure round trip, trim timeout", 15, 20],
+      ["Noise: ping spacing, crosstalk, calibration", 19, 23],
+      ["Optimisation: fixed buffers, single BT write", 21, 23],
+    ]},
+    { name: "Program & Code", c: "--c-code", tasks: [
+      ["Code optimisation", 16, 22],
+      ["Convert to EXE, test on demo laptop", 23, 25],
+    ]},
+    { name: "Gameplay", c: "--c-play", tasks: [
+      ["Dynamic difficulty (primitive)", 14, 18],
+      ["Beer debuff: mirrored controls", 17, 21],
+      ["Iain mole: hammer breaks = game over", 19, 22],
+      ["Multipliers", 21, 22, "stretch"],
+    ]},
+    { name: "UI & Graphic Design", c: "--c-ui", tasks: [
+      ["Overall menu design", 13, 19],
+      ["Instructions screen", 18, 21],
+      ["Aesthetic polish", 21, 25],
+    ]},
+    { name: "Music & SFX", c: "--c-sfx", tasks: [
+      ["Source music & SFX", 16, 20],
+      ["Integrate into game", 21, 23],
+    ]},
+    { name: "Documentation", c: "--c-doc", tasks: [
+      ["Test cases", 13, 26, "ongoing"],
+      ["Progress photos", 13, 27, "ongoing"],
+      ["Manual: Setup Guide", 20, 25],
+      ["Manual: Calibration Guide", 22, 25],
+    ]},
+  ];
+  const MILESTONES = [
+    { d: 22, label: "Feature freeze" },
+    { d: 26, label: "Full dry run" },
+    { d: 27, label: "Week 13 deadline", final: true },
+  ];
+
+  const date = d => new Date(2026, 9, d);
+  const dow = d => date(d).toLocaleDateString("en-AU", { weekday: "short" });
+  const fmt = d => dow(d) + " " + d;
+  const range = (s, e) => s === e ? fmt(s) + " Oct" : `${s}–${e} Oct`;
+  const col = d => d - FIRST + 2;
+
+  const now = new Date();
+  const todayD = (now.getFullYear() === 2026 && now.getMonth() === 9 && now.getDate() >= FIRST && now.getDate() <= LAST) ? now.getDate() : null;
+
+  const g = document.getElementById("gantt");
+  const taskRows = CATS.reduce((n, c) => n + 1 + c.tasks.length, 0);
+  const totalRows = 2 + taskRows + MILESTONES.length;
+  g.style.gridTemplateRows = `repeat(${totalRows}, auto)`;
+
+  function add(cls, html, colStart, colEnd, row, style) {
+    const el = document.createElement("div");
+    el.className = cls;
+    if (html) el.innerHTML = html;
+    el.style.gridColumn = colEnd ? `${colStart} / ${colEnd}` : `${colStart}`;
+    el.style.gridRow = typeof row === "string" ? row : `${row}`;
+    if (style) Object.assign(el.style, style);
+    g.appendChild(el);
+    return el;
+  }
+
+  // Day backgrounds spanning all rows
+  for (let d = FIRST; d <= LAST; d++) {
+    const wd = date(d).getDay();
+    const cls = ["daybg"];
+    if (wd === 0 || wd === 6) cls.push("weekend");
+    if (WEEKS.some(w => w.s === d) && d !== FIRST) cls.push("weekstart");
+    add(cls.join(" "), "", col(d), null, `1 / ${totalRows + 1}`);
+  }
+
+  // Header rows
+  add("lab head-lab", "Week", 1, null, 1);
+  WEEKS.forEach(w => add("wk", `Week ${w.n}<small>${w.s}–${w.e} Oct</small>`, col(w.s), col(w.e) + 1, 1));
+  add("lab head-lab", "Task", 1, null, 2);
+  for (let d = FIRST; d <= LAST; d++) {
+    add("day" + (d === todayD ? " is-today" : ""), `${dow(d)}<b>${d}</b>`, col(d), null, 2);
+  }
+
+  // Task rows
+  let row = 3;
+  CATS.forEach(cat => {
+    const c = `var(${cat.c})`;
+    add("cat", cat.name, 1, null, row, { "--c": c });
+    row++;
+    cat.tasks.forEach(([name, s, e, kind]) => {
+      const tag = kind === "stretch" ? " (stretch)" : kind === "ongoing" ? " · ongoing" : "";
+      add("lab", `<span class="name">${name}</span><span class="range">${range(s, e)}${tag}</span>`, 1, null, row);
+      const t = add("track", "", col(s), col(e) + 1, row);
+      const bar = document.createElement("div");
+      bar.className = "bar" + (kind ? " " + kind : "");
+      bar.style.setProperty("--c", c);
+      bar.title = `${name}: ${range(s, e)}`;
+      t.appendChild(bar);
+      row++;
+    });
+  });
+
+  // Milestone rows
+  const msStart = row;
+  MILESTONES.forEach((m, i) => {
+    add("lab ms-row-lab" + (i === 0 ? " ms-top" : ""), `<span class="name">${m.label}</span><span class="range">${fmt(m.d)} Oct</span>`, 1, null, row);
+    if (i === 0) add("ms-top", "", 2, DAYS + 2, row, { zIndex: 1 });
+    const dm = add("diamond" + (m.final ? " final" : ""), "", col(m.d), null, row);
+    dm.title = `${m.label}: ${fmt(m.d)} Oct`;
+    row++;
+  });
+
+  // Vertical guides
+  MILESTONES.forEach(m => add("vline ms", "", col(m.d), null, `3 / ${msStart + MILESTONES.indexOf(m)}`));
+  if (todayD) add("vline today", "", col(todayD), null, `2 / ${totalRows + 1}`);
+
+  // Week-by-week "finish by" lists
+  const weeksEl = document.getElementById("weeks");
+  WEEKS.forEach(w => {
+    const items = [];
+    CATS.forEach(cat => cat.tasks.forEach(([name, s, e, kind]) => {
+      if (e >= w.s && e <= w.e) items.push({ d: e, name, c: cat.c, kind });
+    }));
+    MILESTONES.forEach(m => { if (m.d >= w.s && m.d <= w.e) items.push({ d: m.d, name: m.label, mile: true, final: m.final }); });
+    items.sort((a, b) => a.d - b.d || (a.mile ? 1 : 0) - (b.mile ? 1 : 0));
+
+    const sec = document.createElement("article");
+    sec.className = "week";
+    sec.innerHTML = `<h2>Week ${w.n}<span>${w.s}–${w.e} Oct</span></h2>` +
+      `<ul>${items.map(it => `<li class="${it.mile ? "mile" + (it.final ? " final" : "") : ""}" ${it.c ? `style="--c:var(${it.c})"` : ""}>` +
+        `<span class="when">${fmt(it.d)}</span>` +
+        `<span class="what">${it.name}${it.kind === "stretch" ? ' <span class="tag">stretch</span>' : ""}</span></li>`).join("")}</ul>`;
+    weeksEl.appendChild(sec);
+  });
+})();
+</script>
+
+</body></html>
