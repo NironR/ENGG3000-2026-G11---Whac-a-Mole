@@ -5,8 +5,9 @@ import random
 import statistics
 import time
 import json
+import audio
+audio.init()
 from PIL import Image, ImageTk
-
 
 #import guard winsound for non-Windows platforms
 try: 
@@ -34,7 +35,6 @@ root.title("Whack-a-Mole")
 root.geometry("600x450") #Size is per pixel
 root.minsize(400,300)
 root.resizable(True, True)# Horizontal, Vertical
-
 
 # -------------------------
 # Game Variables
@@ -64,7 +64,6 @@ HIT_TIME_BONUS = 1;
 LEADERBOARD_FILE = "leaderboard.json"
 MAX_LEADERBOARD_ENTRIES = 5
 
-
 def load_leaderboard():
     """Load saved leaderboard scores from the JSON file."""
     try:
@@ -74,12 +73,10 @@ def load_leaderboard():
     except (FileNotFoundError, json.JSONDecodeError):
         return []
 
-
 def save_leaderboard(leaderboard):
     """Save leaderboard scores to the JSON file."""
     with open(LEADERBOARD_FILE, "w") as file:
         json.dump(leaderboard, file, indent=4)
-
 
 def add_leaderboard_score(player_name, player_score):
     """Add a new score and keep only the top five results."""
@@ -169,7 +166,6 @@ difficulty_settings = {
 combo = 0
 current_difficulty = "Easy"
 
-
 def update_difficulty():
     global current_difficulty
 
@@ -179,6 +175,9 @@ def update_difficulty():
         current_difficulty = "Medium"
     else:
         current_difficulty = "Easy"
+
+    if game_running:
+        audio.play_music(current_difficulty)
 
 # -------------------------
 # Combo-Based Scoring
@@ -234,7 +233,6 @@ mole_visible_fraction = 0.0
 mole_animation_timer = None
 mole_active_started_at = None
 mole_active_duration_ms = 0
-
 
 MOLE_HIT_DURATION_MS = 225
 MOLE_ANIMATION_STEPS = 12
@@ -302,7 +300,6 @@ def get_hole_bounds(hole, scale):
     y2 = centre_y + hole_height / 2
 
     return x1, y1, x2, y2
-
 
 def draw_hole(hole):
     if hole["canvas_id"] is None:
@@ -484,7 +481,6 @@ def animate_mole_rise(step=0):
         lambda: animate_mole_rise(step + 1)
     )
 
-
 def start_mole_fall():
     global mole_state
     global mole_animation_timer
@@ -496,7 +492,6 @@ def start_mole_fall():
     mole_state = "falling"
 
     animate_mole_fall(0)
-
 
 def animate_mole_fall(step=0):
     global mole
@@ -682,7 +677,6 @@ def start_hammer_strike():
     hammer_frame_index = 0
 
     animate_hammer_strike()
-
 
 def animate_hammer_strike(step=0):
     global hammer_frame_index
@@ -953,7 +947,6 @@ active_box_id = None     # which box currently owns the cursor
 last_warning_beep = 0.00
 warning_label = None
 
-
 def read_reading(ser, box_id):
     """One DIST reply from this box, or None. Skips WARNING and any stray line."""
     for _ in range(4):
@@ -968,7 +961,6 @@ def read_reading(ser, box_id):
                 return None
     return None
 
-
 def connect_box(box_id, retry_after, connecting):
     port_name = find_port(box_id)
     try:
@@ -982,15 +974,12 @@ def connect_box(box_id, retry_after, connecting):
     finally:
         connecting.discard(box_id)
 
-
 _NOTHING_PENDING = object()
-
 
 def same_spot(a, b):
     if a is None or b is None:
         return a is None and b is None
     return abs(a - b) < JUMP_MM
-
 
 def settle(box_id, reading):
     current = latest_by_box.get(box_id)
@@ -1005,7 +994,6 @@ def settle(box_id, reading):
         return reading
     pending_by_box[box_id] = reading
     return current
-
 
 class OneEuroFilter:
     def __init__(self, min_cutoff_hz, speed_gain, deriv_cutoff_hz=1.0):
@@ -1030,9 +1018,7 @@ class OneEuroFilter:
         self.value += self._alpha(cutoff, dt) * (target - self.value)
         return self.value
 
-
 snapped_row = None
-
 
 def snap_to_hole(x_m, y_m):
     global snapped_row
@@ -1045,11 +1031,9 @@ def snap_to_hole(x_m, y_m):
     snapped_row = row
     return (col + 0.5) * (ROOM_WIDTH_M / GRID_COLS), (row + 0.5) * row_h
 
-
 cursor_filter_x = OneEuroFilter(CURSOR_STILL_HZ, CURSOR_MOVE_GAIN)
 cursor_filter_y = OneEuroFilter(CURSOR_STILL_HZ, CURSOR_MOVE_GAIN)
 last_frame_at = time.monotonic()
-
 
 def serial_thread():
     if not serial_available:
@@ -1098,13 +1082,11 @@ def serial_thread():
 
         time.sleep(0.01)   # nothing answered: don't spin the CPU
 
-
 def distance_to_metres(distance_mm):
     span = sensor_far_mm - sensor_near_mm
     fraction = (distance_mm - sensor_near_mm) / span
     fraction = max(0.0, min(1.0, fraction))
     return fraction * ROOM_HEIGHT_M
-
 
 def pick_box(seen, current):
     """Nearest box wins, but `current` keeps the column until another is clearly
@@ -1117,21 +1099,17 @@ def pick_box(seen, current):
         return current
     return nearest
 
-
 assert pick_box({}, None) is None
 assert pick_box({1: 900, 2: 800}, None) == 2   # nobody owns it yet: nearest wins
 assert pick_box({1: 900, 2: 870}, 1) == 1
 assert pick_box({1: 900, 2: 800}, 1) == 2
 assert pick_box({1: 900, 2: 800}, 3) == 2      # owner dropped out: nearest wins
 
-
 MIRROR_BOXES = True
-
 
 def box_x_mm(box_id):
     column = GRID_COLS + 1 - box_id if MIRROR_BOXES else box_id
     return (column - 0.5) * (ROOM_WIDTH_M / GRID_COLS) * 1000
-
 
 def trilaterate(seen, anchor_id):
     anchor_x = box_x_mm(anchor_id)
@@ -1151,10 +1129,8 @@ def trilaterate(seen, anchor_id):
         return None
     return x, (intercept - x * x) ** 0.5
 
-
 def _ranges_to(x, y):
     return {k: round(((x - box_x_mm(k)) ** 2 + y * y) ** 0.5) for k in (1, 2, 3)}
-
 
 _spot = trilaterate(_ranges_to(500, 1300), 1)                   
 assert abs(_spot[0] - 500) < 5 and abs(_spot[1] - 1300) < 5
@@ -1164,17 +1140,14 @@ assert trilaterate({2: 1300}, 2) is None
 assert trilaterate({1: 550, 2: 1300}, 2) is None                  
 assert trilaterate({1: 565, 2: 2210, 3: 545}, 3) is None          
 
-
 def in_dead_zone(seen):
     """Any box sees someone in the dead zone - not just the box owning the cursor,
     which stickiness can leave on a box further away than the closest one."""
     return any(d <= WARNING_DISTANCE_MM for d in seen.values())
 
-
 assert not in_dead_zone({})
 assert not in_dead_zone({1: 900, 2: WARNING_DISTANCE_MM + 1})
 assert in_dead_zone({1: 900, 2: WARNING_DISTANCE_MM - 50})   # box 2 alone is enough
-
 
 def proximity_alarm(too_close):
     """Beep and cover the screen with a warning while someone is in the dead zone."""
@@ -1205,7 +1178,6 @@ def proximity_alarm(too_close):
     print("WARNING: Player is within 60cm of the screen")
     if winsound_available:
         threading.Thread(target=winsound.Beep, args=(1000, 200), daemon=True).start()
-
 
 def poll_sensor():
     global cursor_x_m, cursor_y_m, active_box_id, last_frame_at
@@ -1245,11 +1217,9 @@ def poll_sensor():
 
     root.after(FRAME_MS, poll_sensor)
 
-
 # -------------------------
 # Start Menu
 # -------------------------
-
 
 def start_menu():
 
@@ -1266,7 +1236,6 @@ def start_menu():
         font=("Arial", 32, "bold")
     )
     title.pack(pady=50)
-
 
 
     tk.Button(
@@ -1345,6 +1314,7 @@ def begin_round():
     schedule_next_mole()
     update_cursor_indicator()
     round_timer_id = root.after(1000, tick_round_timer)
+    audio.play_music(current_difficulty)
 # -------------------------
 # Create Game
 # -------------------------
@@ -1550,7 +1520,6 @@ def schedule_next_mole():
         show_mole
     )
 
-
 # -------------------------
 # Show Mole
 # -------------------------
@@ -1617,7 +1586,6 @@ def hide_mole():
     mole_timer = None
 
     start_mole_fall()
-
 
 # -------------------------
 # Whack Mole
@@ -1705,7 +1673,7 @@ def check_whack():
             mole_timer = None
 
         start_hammer_strike()
-
+        audio.play_whack()
         # Show the hit sprite before the mole falls
         mole_state = "hit"
         mole_visible_fraction = 1.0
@@ -1740,7 +1708,6 @@ def update_cursor_indicator():
                 width=0
             )
 
-
 # -------------------------
 # Round Timer
 # -------------------------
@@ -1769,7 +1736,7 @@ def end_round():
     global hammer_frame_index
 
     game_running = False
-
+    audio.stop_music()
     if mole_timer is not None:
         root.after_cancel(mole_timer)
         mole_timer = None
@@ -1934,7 +1901,7 @@ def return_to_menu(event=None):
 
     # Stop the game
     game_running = False
-
+    audio.stop_music()
     # Cancel existing timers
     if mole_timer is not None:
         root.after_cancel(mole_timer)
@@ -1979,3 +1946,4 @@ root.bind("<F11>", toggle_fullscreen)
 root.after(50, poll_sensor)
 root.after(5, poll_mouse)
 root.mainloop()
+
