@@ -5,7 +5,7 @@ BluetoothSerial SerialBT;
 #define BOX_ID 1  // SENSOR BOX NO.
 
 //Ultrasonic sensor pins
-int echoPin1 = 5;   // TODO move off GPIO5: it is a boot strapping pin and Echo idles LOW
+int echoPin1 = 23;
 int trigPin1 = 18;
 int echoPin2 = 19;
 int trigPin2 = 21;
