@@ -51,7 +51,7 @@ py whacka.py
 Note: In the case where no sensor boxes are connected, the game is able to play via mouse cursor. (Used for debugging/testing)
 
 ## Hardware setup
-1. **Flash each box.** Open `sensor.ino` in the Arduino IDE with the ESP32 board package (Espressif) installed. Set `#define BOX_ID` to the box's number (1, 2 or 3), then upload. Each box has two RCWL-1601 sensors: sensor 1 on Trig 18 / Echo 5, sensor 2 on Trig 21 / Echo 19.
+1. **Flash each box.** Open `sensor.ino` in the Arduino IDE with the ESP32 board package (Espressif) installed. Set `#define BOX_ID` to the box's number (1, 2 or 3), then upload. Each box has two RCWL-1601 sensors: sensor 1 on Trig 18 / Echo 23, sensor 2 on Trig 21 / Echo 19.
 2. **Pair each box** with the PC in Windows Bluetooth settings. Boxes advertise as `ENGG3000_<BOX_ID>`.
 3. **Map the boxes.** `boxes.py` matches each box to its COM port by Bluetooth address, so re-pairing (which changes the COM number) doesn't break anything. It is listed in `.gitignore`, so each machine needs its own copy.
 4. **Place the boxes** along the screen wall, one per column. With `MIRROR_BOXES = True` in `whacka.py`, box 1 drives the right-hand column on screen and box 3 the left. If the boxes sit out from the wall, set `BOX_WALL_OFFSET_MM` to that distance.
@@ -100,10 +100,13 @@ Credit goes to [CocoonAI](https://github.com/Cocoon-AI/architecture-diagram-gene
 
 ## Changelog
 ### Unreleased
+#### Changed
+- Sensor 1 Echo moved from GPIO5 (a boot strapping pin) to GPIO23. Rewire each box to match.
+
 #### Planned
 - Packaged `.exe` build of the game.`````
 - One 4xAA NiMH pack per sensor box, to stop brownout resets when Bluetooth starts.
-- Firmware: move sensor 1's Echo off GPIO5 (a boot strapping pin), and reduce latency and noise.
+- Firmware: reduce latency and noise.
 - Buffs and debuffs, e.g. a mirrored-controls mole and a hammer-breaking mole that ends the game.
 - Music and sound effects.
 - Setup and calibration guides.
