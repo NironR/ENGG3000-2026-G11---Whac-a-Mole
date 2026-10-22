@@ -50,11 +50,12 @@ import random  # chooses which hole and how long a mole stays up
 import statistics  # linear regression, used by trilaterate()
 import time  # monotonic clock: reaction timing and sensor frame time
 import json  # reads and writes leaderboard.json
+import audio
+audio.init()
 from PIL import Image, ImageTk  # Pillow: load, resize and rotate sprites; convert them for Tk
 
 # Menu screens + backdrop live in menus.py (keep it in the same folder as this file)
 from menus import Backdrop, MenuManager
-
 
 #import guard winsound for non-Windows platforms
 # Optional: winsound only exists on Windows and is used to beep when the player stands too close. If
@@ -86,7 +87,6 @@ root.title("Whack-a-Mole")
 root.geometry("960x540") #Size is per pixel (16:9 to match the cabinet art)
 root.minsize(640,360)  # smallest size the window can be dragged to
 root.resizable(True, True)# Horizontal, Vertical
-
 
 # -------------------------
 # Game Variables
@@ -250,6 +250,9 @@ def update_difficulty():
         current_difficulty = "Medium"
     else:
         current_difficulty = "Easy"
+
+    if game_running:
+        audio.play_music(current_difficulty)
 
 # -------------------------
 # Combo-Based Scoring
@@ -1410,7 +1413,6 @@ def distance_to_metres(distance_mm):
     fraction = max(0.0, min(1.0, fraction))
     return fraction * ROOM_HEIGHT_M
 
-
 def pick_box(seen, current):
     """Nearest box wins, but `current` keeps the column until another is clearly
     closer - a player is wider than the gap between columns, so without this the
@@ -1481,17 +1483,14 @@ assert trilaterate({2: 1300}, 2) is None
 assert trilaterate({1: 550, 2: 1300}, 2) is None                  
 assert trilaterate({1: 565, 2: 2210, 3: 545}, 3) is None          
 
-
 def in_dead_zone(seen):
     """Any box sees someone in the dead zone - not just the box owning the cursor,
     which stickiness can leave on a box further away than the closest one."""
     return any(d <= WARNING_DISTANCE_MM for d in seen.values())
 
-
 assert not in_dead_zone({})
 assert not in_dead_zone({1: 900, 2: WARNING_DISTANCE_MM + 1})
 assert in_dead_zone({1: 900, 2: WARNING_DISTANCE_MM - 50})   # box 2 alone is enough
-
 
 def proximity_alarm(too_close):
     """Beep and cover the screen with a warning while someone is in the dead zone."""
@@ -1565,7 +1564,6 @@ def poll_sensor():
         check_whack()
 
     root.after(FRAME_MS, poll_sensor)
-
 
 # -------------------------
 # Menu state helpers
@@ -1682,6 +1680,7 @@ def begin_round():
     schedule_next_mole()
     update_cursor_indicator()
     round_timer_id = root.after(1000, tick_round_timer)
+    audio.play_music(current_difficulty)
 # -------------------------
 # Create Game
 # -------------------------
@@ -1936,7 +1935,6 @@ def schedule_next_mole():
         show_mole
     )
 
-
 # -------------------------
 # Show Mole
 # -------------------------
@@ -2006,7 +2004,6 @@ def hide_mole():
     mole_timer = None
 
     start_mole_fall()
-
 
 # -------------------------
 # Whack Mole
@@ -2099,7 +2096,7 @@ def check_whack():
             mole_timer = None
 
         start_hammer_strike()
-
+        audio.play_whack()
         # Show the hit sprite before the mole falls
         mole_state = "hit"
         mole_visible_fraction = 1.0
@@ -2136,7 +2133,6 @@ def update_cursor_indicator():
                 width=0
             )
 
-
 # -------------------------
 # Round Timer
 # -------------------------
@@ -2168,7 +2164,7 @@ def end_round():
     global hammer_frame_index
 
     game_running = False
-
+    audio.stop_music()
     if mole_timer is not None:
         root.after_cancel(mole_timer)
         mole_timer = None
@@ -2245,7 +2241,7 @@ def return_to_menu(event=None):
 
     # Stop the game
     game_running = False
-
+    audio.stop_music()
     # Cancel existing timers
     if mole_timer is not None:
         root.after_cancel(mole_timer)
@@ -2298,3 +2294,4 @@ root.after(50, poll_sensor)
 root.after(5, poll_mouse)
 # Hand control to Tk. From here the game runs entirely from the scheduled callbacks above.
 root.mainloop()
+
