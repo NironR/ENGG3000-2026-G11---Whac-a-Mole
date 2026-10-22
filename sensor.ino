@@ -12,6 +12,8 @@ int trigPin2 = 21;
 
 const unsigned long ECHO_TIMEOUT_US = 15000;
 const unsigned long ECHO_START_US = 2000;
+const long MIN_MM = 30;         // RCWL-1601 blind zone: anything nearer is junk
+const long MERGE_GAP_MM = 150;  // readings further apart than this saw different things
 
 
 void setup() {
@@ -26,6 +28,8 @@ void setup() {
   Serial.print("Reset reason: ");
   Serial.print(reason);
   Serial.println(reason == ESP_RST_BROWNOUT ? "  <-- BROWNOUT: supply is sagging" : "");
+  // Before Bluetooth starts, so it still prints over USB if BT browns the board out.
+  Serial.println(selfTest() ? "Self-test OK" : "Self-test FAILED: check combineReadings/echoToMm");
 
   String btName = "ENGG3000_";
   btName += BOX_ID;
@@ -69,7 +73,10 @@ long combineReadings(long d1, long d2) {
   bool validD2 = (d2 >= 0);
 
   if (validD1 && validD2) {
-    return (d1 + d2) / 2; // Average the two readings
+    // Close together: both saw the same thing, so average out the noise.
+    // Far apart: one sees the player, the other the wall behind - the player is nearer.
+    if (abs(d1 - d2) <= MERGE_GAP_MM) return (d1 + d2) / 2;
+    return min(d1, d2);
   } else if (validD1) {
     return d1; // Only d1 is valid
   } else if (validD2) {
@@ -112,5 +119,18 @@ void readBothDistancesMm(long &d1, long &d2) {
 
 long echoToMm(unsigned long roundTripUs) {
   if (roundTripUs > ECHO_TIMEOUT_US) return -1;
-  return roundTripUs * 0.343 / 2;
+  long mm = roundTripUs * 0.343 / 2;
+  return mm < MIN_MM ? -1 : mm;
+}
+
+bool selfTest() {
+  return combineReadings(500, 600) == 550     // close: averaged
+      && combineReadings(500, 650) == 575     // exactly MERGE_GAP_MM apart: still averaged
+      && combineReadings(600, 2000) == 600    // player + wall: nearer wins
+      && combineReadings(2000, 600) == 600
+      && combineReadings(-1, 700) == 700
+      && combineReadings(-1, -1) == -1
+      && echoToMm(100) == -1                  // 17 mm: blind zone
+      && echoToMm(1000) == 171
+      && echoToMm(ECHO_TIMEOUT_US + 1) == -1;
 }
