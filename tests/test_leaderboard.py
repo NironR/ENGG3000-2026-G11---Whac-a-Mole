@@ -261,6 +261,67 @@ class TestLeaderboard(unittest.TestCase):
 
             self.assertEqual(temporary_files, [])
 
+    def test_repeated_score_submissions(self):
+        # Extract real leaderboard functions
+        tree = ast.parse(GAME_FILE.read_text(encoding="utf-8"))
+
+        names = {
+            "load_leaderboard",
+            "save_leaderboard",
+            "add_leaderboard_score"
+        }
+
+        functions = [
+            node for node in tree.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name in names
+        ]
+
+        self.assertEqual(len(functions), 3)
+
+        with tempfile.TemporaryDirectory() as folder:
+            test_file = Path(folder) / "leaderboard.json"
+
+            scope = {
+                "json": json,
+                "os": os,
+                "tempfile": tempfile,
+                "LEADERBOARD_FILE": str(test_file),
+                "MAX_LEADERBOARD_ENTRIES": 5
+            }
+
+            exec(
+                compile(
+                    ast.Module(body=functions, type_ignores=[]),
+                    str(GAME_FILE),
+                    "exec"
+                ),
+                scope
+            )
+
+            # Simulate 100 consecutive score submissions
+            for i in range(100):
+                scope["add_leaderboard_score"](
+                    f"Player{i}", i
+                )
+
+            leaderboard = scope["load_leaderboard"]()
+
+            # Only the five highest scores should remain
+            self.assertEqual(len(leaderboard), 5)
+
+            self.assertEqual(
+                [entry["score"] for entry in leaderboard],
+                [99, 98, 97, 96, 95]
+            )
+
+            # Verify saved data is still valid JSON
+            saved_data = json.loads(
+                test_file.read_text(encoding="utf-8")
+            )
+
+            self.assertEqual(saved_data, leaderboard)
+
 
 if __name__ == "__main__":
     unittest.main()
