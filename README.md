@@ -109,6 +109,10 @@ Stepping within 60 cm of the screen sounds an alarm.
 ## Acknowledgements
 
 Credit goes to [CocoonAI](https://github.com/Cocoon-AI/architecture-diagram-generator/tree/main) for constructing the diagram of the run-time for Whac-a-Mole.
+Thank you to Kevin MacLeod from #Uppbeat
+https://uppbeat.io/t/kevin-macleod/cyborg-ninja
+License code: 1XM2XESSM8THVEE1
+for the use of ninja cyborg used for our background audio.
 
 ## Changelog
 ### Unreleased
