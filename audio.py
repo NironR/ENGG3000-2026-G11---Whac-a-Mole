@@ -4,9 +4,9 @@ import sys
 
 ASSET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Assets")
 MUSIC_FILES = {
-    "Easy": os.path.join(ASSET_DIR, "background_easy.mp3"),
-    "Medium": os.path.join(ASSET_DIR, "background_medium.mp3"),
-    "Hard": os.path.join(ASSET_DIR, "background_hard.mp3"),
+    "Easy": os.path.join(ASSET_DIR, "Audio","background_easy.mp3"),
+    "Medium": os.path.join(ASSET_DIR,"Audio", "background_medium.mp3"),
+    "Hard": os.path.join(ASSET_DIR,"Audio", "background_hard.mp3"),
 }
 MUSIC_ALIASES = {
     "Easy": "music_easy",
@@ -34,7 +34,7 @@ def _mci(command):
 #Preloading the music makes loading game slower but less delay when music switches up.
 def _preload(filename, alias, volume):
     """Open a file once, ahead of time, so playing it later is instant."""
-    path = os.path.join(ASSET_DIR, filename)
+    path = os.path.join(ASSET_DIR,"Audio", filename)
     if not os.path.exists(path):
         print(f"Audio: {path} not found.")
         return

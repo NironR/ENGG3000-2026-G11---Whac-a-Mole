@@ -2228,6 +2228,7 @@ def toggle_fullscreen(event=None):
 # Esc: abandons the current round (cancelling every timer, as end_round does) and shows the home
 # menu. No score is saved.
 def return_to_menu(event=None):
+
     global game_running
     global mole
     global mole_timer
@@ -2273,6 +2274,14 @@ def return_to_menu(event=None):
 
     # Return to start menu
     start_menu()
+
+# -------------------------
+# Debug: Force Game Over
+# -------------------------  
+def debug_end_round(event=None):
+    if not game_running:
+        return
+    end_round()
 # -------------------------
 # Start
 # -------------------------  
@@ -2287,7 +2296,7 @@ start_menu()
 # Keyboard shortcuts: Esc = back to the menu, F11 = fullscreen.
 root.bind("<Escape>", return_to_menu)
 root.bind("<F11>", toggle_fullscreen)
-
+root.bind("<F10>", debug_end_round)  # debug: force game over
 # Start the two input loops: sensors and mouse. The mouse loop does nothing while a sensor box is
 # connected.
 root.after(50, poll_sensor)
