@@ -15,8 +15,9 @@ Whack-a-Mole.spec
 run.bat
 tempCodeRunnerFile.py
 
-# Leaderboard
+# Leaderboard (and temp files left if a save is interrupted)
 leaderboard.json
+leaderboard_*.tmp
 
-#old code
-sensor_old/sensor_old.ino
+# Editor settings
+.vscode/

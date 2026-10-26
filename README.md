@@ -50,10 +50,18 @@ py whacka.py
 
 Note: In the case where no sensor boxes are connected, the game is able to play via mouse cursor. (Used for debugging/testing)
 
+5. (Optional: Run the tests)
+
+```bash
+py -m unittest discover -s tests -v
+```
+
+The same tests run on GitHub for every pull request.
+
 ## Hardware setup
 1. **Flash each box.** Open `sensor.ino` in the Arduino IDE with the ESP32 board package (Espressif) installed. Set `#define BOX_ID` to the box's number (1, 2 or 3), then upload. Each box has two RCWL-1601 sensors: sensor 1 on Trig 18 / Echo 23, sensor 2 on Trig 21 / Echo 19.
 2. **Pair each box** with the PC in Windows Bluetooth settings. Boxes advertise as `ENGG3000_<BOX_ID>`.
-3. **Map the boxes.** `boxes.py` matches each box to its COM port by Bluetooth address, so re-pairing (which changes the COM number) doesn't break anything. It is listed in `.gitignore`, so each machine needs its own copy.
+3. **Map the boxes.** `boxes.py` matches each box to its COM port by Bluetooth address, re-pairing it.
 4. **Place the boxes** along the screen wall, one per column. With `MIRROR_BOXES = True` in `whacka.py`, box 1 drives the right-hand column on screen and box 3 the left. If the boxes sit out from the wall, set `BOX_WALL_OFFSET_MM` to that distance.
 5. **Check the boxes** before playing:
 
@@ -69,6 +77,7 @@ This pings every box 10 times and reports round-trip latency. Pass a port (e.g. 
 | Move in the play area | Move the hammer (mouse when no boxes are connected) |
 | `Esc` | Return to the menu |
 | `F11` | Toggle fullscreen |
+| `F10` | Debug: force game over |
 
 Stepping within 60 cm of the screen sounds an alarm.
 
@@ -79,6 +88,9 @@ Stepping within 60 cm of the screen sounds an alarm.
 - `whacka.py`: the game. Polls each paired box in turn, picks the
   column from whichever box sees the player, and maps that box's
   distance reading to depth in the grid.
+- `menus.py`: start, game-over and leaderboard menus.
+- `audio.py`: background music per difficulty and the hammer hit sound
+  (Windows only).
 - `boxes.py`: finds each box's COM port from its Bluetooth address.
 - `bt_test.py`: bench tool for checking boxes over Bluetooth without
   launching the game.
@@ -100,15 +112,22 @@ Credit goes to [CocoonAI](https://github.com/Cocoon-AI/architecture-diagram-gene
 
 ## Changelog
 ### Unreleased
+#### Added
+- Background music that changes with difficulty, and a hammer hit sound.
+- Redesigned fullscreen menus.
+- `F10` debug key to force game over.
+- Automated tests for the leaderboard, difficulty and scoring, run on every pull request.
+
 #### Changed
 - Sensor 1 Echo moved from GPIO5 (a boot strapping pin) to GPIO23. Rewire each box to match.
+- Readings in the sensors' blind zone are dropped, and the player is no longer averaged with the wall.
+- The leaderboard ignores corrupt entries and saves via a temp file, so a failed save can't wipe it.
 
 #### Planned
-- Packaged `.exe` build of the game.`````
+- Packaged `.exe` build of the game.
 - One 4xAA NiMH pack per sensor box, to stop brownout resets when Bluetooth starts.
 - Firmware: reduce latency and noise.
 - Buffs and debuffs, e.g. a mirrored-controls mole and a hammer-breaking mole that ends the game.
-- Music and sound effects.
 - Setup and calibration guides.
 
 ### 0.3.0 - 2026-10-05
