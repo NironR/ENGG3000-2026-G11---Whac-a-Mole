@@ -44,6 +44,7 @@
 #   otherwise a stale timer fires on top of the menu.
 import math  # pi, used by the cursor smoothing filter
 import os  # builds the path of leaderboard.json
+import tempfile
 import threading  # background sensor loop and beeps, keeps the window responsive
 import tkinter as tk  # the GUI toolkit: window, canvas, labels
 import random  # chooses which hole and how long a mole stays up
@@ -60,7 +61,7 @@ from menus import Backdrop, MenuManager
 #import guard winsound for non-Windows platforms
 # Optional: winsound only exists on Windows and is used to beep when the player stands too close. If
 # it cannot be imported the game simply skips the beep.
-try: 
+try:
     import winsound
     winsound_available = True
 except ImportError:
@@ -135,20 +136,83 @@ saved_high_score = 0  # best saved score, shown in the cabinet's HIGH SCORE pane
 # Reads leaderboard.json and returns a list of {'name': ..., 'score': ...}, best first. A missing or
 # corrupt file gives an empty list, so the game never crashes because of it.
 def load_leaderboard():
-    """Load saved leaderboard scores from the JSON file."""
-    try:
-        with open(LEADERBOARD_FILE, "r") as file:
-            return json.load(file)
+    """Load and validate leaderboard data safely."""
 
-    except (FileNotFoundError, json.JSONDecodeError):
+    try:
+        with open(LEADERBOARD_FILE, "r", encoding="utf-8") as file:
+            data = json.load(file)
+
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
         return []
+
+    # Leaderboard must be a list
+    if not isinstance(data, list):
+        return []
+
+    valid_scores = []
+
+    for entry in data:
+
+        # Each entry must be a dictionary
+        if not isinstance(entry, dict):
+            continue
+
+        name = entry.get("name")
+        score = entry.get("score")
+
+        # Validate player name
+        if not isinstance(name, str) or not name.strip():
+            continue
+
+        # Validate score
+        if type(score) is not int or score < 0:
+            continue
+
+        valid_scores.append({
+            "name": name.strip(),
+            "score": score
+        })
+
+    # Sort from highest to lowest
+    valid_scores.sort(
+        key=lambda entry: entry["score"],
+        reverse=True
+    )
+
+    # Keep only top five
+    return valid_scores[:MAX_LEADERBOARD_ENTRIES]
 
 
 # Writes the whole leaderboard list back to leaderboard.json (overwrites the file).
 def save_leaderboard(leaderboard):
-    """Save leaderboard scores to the JSON file."""
-    with open(LEADERBOARD_FILE, "w") as file:
-        json.dump(leaderboard, file, indent=4)
+    """Save leaderboard safely using a temporary file."""
+
+    temp_path = None
+
+    try:
+        # Create temporary file in the same folder
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=os.path.dirname(LEADERBOARD_FILE),
+            prefix="leaderboard_",
+            suffix=".tmp",
+            delete=False
+        ) as temp_file:
+
+            temp_path = temp_file.name
+            json.dump(leaderboard, temp_file, indent=4)
+
+        # Replace old leaderboard only after writing succeeds
+        os.replace(temp_path, LEADERBOARD_FILE)
+
+    finally:
+        # Clean up temporary file if something went wrong
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
 
 
 # Adds one score, sorts best-first, trims to MAX_LEADERBOARD_ENTRIES and saves. Returns the new
