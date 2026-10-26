@@ -2082,14 +2082,11 @@ def check_whack():
 
     global score
     global combo
-    global mole
     global mole_timer
     global mole_state
     global mole_visible_fraction
     global mole_animation_timer
     global successful_hits
-    global mole_active_started_at
-    global mole_active_duration_ms
     global time_remaining
 
     # Only a fully raised, active mole can be hit
