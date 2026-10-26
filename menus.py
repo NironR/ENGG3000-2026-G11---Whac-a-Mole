@@ -626,13 +626,29 @@ class MenuManager:
     # 'SCORE SAVED'. The actual saving is done by the submit_score callback the game supplied.
     def _save(self):
         name = self.entry_text.get().strip()
+
         if not name:
             self.message = "TYPE YOUR INITIALS FIRST"
             self.render()
             if self._entry_visible():
                 self.entry.focus_set()
             return
-        self.submit_score(name, self.final_score)
+
+        # Handle leaderboard saving errors
+        try:
+            self.submit_score(name, self.final_score)
+
+        except OSError as error:
+            print(f"Leaderboard save failed: {error}")
+
+            self.message = "SAVE FAILED - TRY AGAIN"
+            self.render()
+
+            if self._entry_visible():
+                self.entry.focus_set()
+            return
+
+        # Only mark as saved after successful file writing
         self.saved = True
         self.message = ""
         self.selected = 0
