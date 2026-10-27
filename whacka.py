@@ -1585,8 +1585,51 @@ def proximity_alarm(too_close):
     print("WARNING: Player is within 60cm of the screen")
     if winsound_available:
         threading.Thread(target=winsound.Beep, args=(1000, 200), daemon=True).start()
+#
+# Pause
+#
+game_paused = False
+player_missing_since = None
+pause_label = None
+player_gone = 1.0   # seconds with nobody detected before pausing
 
 
+def set_paused(paused):
+    global game_paused, pause_label
+    game_paused = paused
+
+    if paused:
+        if pause_label is None or not pause_label.winfo_exists():
+            pause_label = tk.Label(
+                root,
+                text="PLAYER NOT DETECTED",
+                font=("Arial", 36, "bold"),
+                fg="white",
+                bg="red"
+            )
+        pause_label.place(relx=0.5, rely=0.5, anchor="center", relwidth=1.0, relheight=0.3)
+        pause_label.lift()
+    elif pause_label is not None and pause_label.winfo_exists():
+        pause_label.place_forget()
+
+
+def update_pause(player_seen):
+    """Called every frame with True if any box sees someone."""
+    global player_missing_since
+
+    sensors_connected = any(link is not None for link in box_links.values())
+
+    if not game_running or not sensors_connected or player_seen:
+        player_missing_since = None
+        if game_paused:
+            set_paused(False)
+        return
+
+    now = time.monotonic()
+    if player_missing_since is None:
+        player_missing_since = now
+    elif now - player_missing_since >= player_gone and not game_paused:
+        set_paused(True)
 # Runs every FRAME_MS. Each frame: (1) copy the latest box readings, (2) show or hide the TOO CLOSE
 # alarm, (3) choose the box that owns the cursor, (4) convert its distance to a position, snap it to
 # a hole and smooth it, (5) move the hammer and check for a hit. The cursor is only moved while a
@@ -1602,7 +1645,7 @@ def poll_sensor():
                 if d is not None and d <= sensor_far_mm}
 
     proximity_alarm(game_running and in_dead_zone(seen))
-
+    update_pause(bool(seen))
     box_id = pick_box(seen, active_box_id)
     if box_id is not None and game_running:
         active_box_id = box_id
@@ -1649,6 +1692,7 @@ def clear_cursor_indicator():
 # Puts the playfield into its idle look just before a menu appears: refreshes the high score,
 # removes any banner and outline, hides the hammer and redraws the HUD.
 def enter_menu_state():
+    set_paused(False)
     refresh_high_score()
     menus.clear_banner()
     clear_cursor_indicator()
@@ -2009,10 +2053,14 @@ def show_mole():
     global mole_timer
     global mole_state
     global mole_visible_fraction
+    global next_mole_timer
 
     if not game_running:
         return
-
+    if game_paused:
+        next_mole_timer = root.after(100, show_mole)
+        return
+    
     # Safety check:
     # Make sure there isn't already a mole
     if mole is not None:
@@ -2044,11 +2092,16 @@ def show_mole():
 def hide_mole():
     global mole_timer
     global combo
+    global mole_active_started_at
 
     if mole is None:
         return
 
     if mole_state != "active":
+        return
+    if game_paused:
+        mole_active_started_at += 0.1
+        mole_timer = root.after(100, hide_mole)
         return
 
     # If the mole disappears without being hit,
@@ -2090,9 +2143,8 @@ def check_whack():
     global time_remaining
 
     # Only a fully raised, active mole can be hit
-    if mole is None or mole_state != "active":
+    if game_paused or mole is None or mole_state != "active":
         return
-
     mole_x_m = mole["x_m"]
     mole_y_m = mole["y_m"]
     dx = cursor_x_m - mole_x_m
@@ -2201,6 +2253,9 @@ def update_cursor_indicator():
 def tick_round_timer():
     global round_timer_id, time_remaining
     if not game_running:
+        return
+    if game_paused:
+        round_timer_id = root.after(200, tick_round_timer)
         return
     time_remaining -= 1
     timer_label.config(text=f"Time: {time_remaining}s")
