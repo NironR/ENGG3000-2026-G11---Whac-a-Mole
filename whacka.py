@@ -115,7 +115,16 @@ ROUND_DURATION = 60 #Timer in seconds
 time_remaining = ROUND_DURATION;
 # Seconds added to the clock for every successful hit (never above ROUND_DURATION). Set to 0 for a
 # strict countdown.
-HIT_TIME_BONUS = 1;
+
+# Normal hits no longer add time.
+# Extra time is now earned specifically from the Time Mole.
+HIT_TIME_BONUS = 0
+
+# Seconds awarded when a Time Mole is hit.
+TIME_MOLE_BONUS = 5
+
+# Golden Hammer lasts for five seconds.
+GOLDEN_HAMMER_DURATION_S = 5
 
 # -------------------------
 # Leaderboard System
@@ -398,11 +407,55 @@ PLAYFIELD_BACK_RIGHT = (0.607, 0.486)
 PLAYFIELD_FRONT_LEFT = (0.318, 0.656)
 PLAYFIELD_FRONT_RIGHT = (0.650, 0.656)
 
-mole_image_source = None  # idle mole PIL image, loaded in create_game
-mole_image_photo = None  # Tk copy of the mole currently shown (must be kept alive)
-mole_image_id = None  # canvas item id of the mole sprite
+# The currently displayed mole uses one of several sprite sets.
+# Each mole type has its own idle/up image and hit image.
+mole_image_sources = {}
 
-mole_hit_image_source = None  # PIL image shown for a moment after the mole is hit
+mole_image_photo = None
+mole_image_id = None
+
+# Stores which type of mole is currently active.
+# The normal mole remains the default.
+current_mole_type = "normal"
+
+# -------------------------
+# Mole Types
+# -------------------------
+# Each difficulty has its own chance of spawning each mole type.
+#
+# Normal moles remain the large majority of targets.
+# Special moles become slightly more common as difficulty increases.
+#
+# The values for each difficulty must add to 1.0.
+MOLE_SPAWN_CHANCES = {
+    "Easy": {
+        "normal": 0.90,
+        "golden": 0.04,
+        "time": 0.04,
+        "combo": 0.02,
+        "ta": 0.0
+    },
+
+    "Medium": {
+        "normal": 0.825,
+        "golden": 0.05,
+        "time": 0.05,
+        "combo": 0.04,
+        "ta": 0.035
+    },
+
+    "Hard": {
+        "normal": 0.775,
+        "golden": 0.06,
+        "time": 0.05,
+        "combo": 0.05,
+        "ta": 0.065
+    }
+}
+
+# Resized mole frames are cached so large PNG files do not need to be
+# resized every time a mole appears.
+mole_resize_cache = {}
 
 # Resized mole frames, keyed by (is_hit, width, height), so the sprite isn't re-resized every animation step
 mole_resize_cache = {}
@@ -558,10 +611,15 @@ def draw_mole_sprite():
         int(hole_width * 0.9)
     )
 
+    # Get the sprite set belonging to the current mole type.
+    sprite_set = mole_image_sources[current_mole_type]
+
+    # A hit uses that mole's hit image.
+    # Rising, active and falling states all use its normal image.
     if mole_state == "hit":
-        source_image = mole_hit_image_source
+        source_image = sprite_set["hit"]
     else:
-        source_image = mole_image_source
+        source_image = sprite_set["idle"]
 
     source_width, source_height = source_image.size
 
@@ -575,7 +633,13 @@ def draw_mole_sprite():
     )
 
     # Resizing images is slow, so each (image, size) is resized once and reused.
-    cache_key = (mole_state == "hit", target_width, target_height)
+    cache_key = (
+    current_mole_type,
+    mole_state == "hit",
+    target_width,
+    target_height
+)
+
     resized_image = mole_resize_cache.get(cache_key)
 
     if resized_image is None:
@@ -806,8 +870,13 @@ def draw_hammer_sprite():
         1,
         int(image_width * HAMMER_WIDTH_FRACTION)
     )
+    # Use the Golden Hammer sprite while its power-up is active.
+    if golden_hammer_active:
+        active_hammer_source = golden_hammer_image_source
+    else:
+        active_hammer_source = hammer_image_source
 
-    source_width, source_height = hammer_image_source.size
+    source_width, source_height = active_hammer_source.size
 
     target_height = max(
         1,
@@ -823,10 +892,18 @@ def draw_hammer_sprite():
         target_height
     )
 
+    # The hammer cache must include its type as well as its size.
+    # Otherwise the normal hammer could remain cached after a Golden Mole is hit.
+    hammer_cache_key = (
+        golden_hammer_active,
+        target_width,
+        target_height
+    )
+
     # Rebuild the cached hammer frames only when
     # the displayed hammer size changes.
-    if hammer_image_size != target_size:
-        resized_image = hammer_image_source.resize(
+    if hammer_image_size != hammer_cache_key:
+        resized_image = active_hammer_source.resize(
             target_size,
             Image.Resampling.LANCZOS
         )
@@ -849,7 +926,7 @@ def draw_hammer_sprite():
                 ImageTk.PhotoImage(rotated_image)
             )
 
-        hammer_image_size = target_size
+        hammer_image_size = hammer_cache_key
 
     if not hammer_frame_photos:
         return
@@ -1587,6 +1664,31 @@ def proximity_alarm(too_close):
         threading.Thread(target=winsound.Beep, args=(1000, 200), daemon=True).start()
 
 
+# -------------------------
+# Golden Hammer Timer
+# -------------------------
+
+# Checks whether the Golden Hammer's five-second effect has expired.
+# time.monotonic() is used so changes to the system clock cannot affect it.
+def update_golden_hammer():
+
+    global golden_hammer_active
+    global hammer_image_size
+
+    if not golden_hammer_active:
+        return
+
+    if time.monotonic() >= golden_hammer_ends_at:
+
+        golden_hammer_active = False
+
+        # Force the hammer frames to rebuild using the normal sprite.
+        hammer_image_size = None
+
+
+        draw_hammer_sprite()
+
+
 # Runs every FRAME_MS. Each frame: (1) copy the latest box readings, (2) show or hide the TOO CLOSE
 # alarm, (3) choose the box that owns the cursor, (4) convert its distance to a position, snap it to
 # a hole and smooth it, (5) move the hammer and check for a hit. The cursor is only moved while a
@@ -1594,7 +1696,12 @@ def proximity_alarm(too_close):
 def poll_sensor():
     global cursor_x_m, cursor_y_m, active_box_id, last_frame_at
 
+# Keep the Golden Hammer timer updated even while using sensors.
+    if game_running:
+        update_golden_hammer()
+
     now = time.monotonic()
+
     dt, last_frame_at = now - last_frame_at, now
 
     with distance_lock:
@@ -1688,11 +1795,24 @@ def start_game(difficulty):
     global game_running
     global successful_hits
 
+    global golden_hammer_active
+    global golden_hammer_ends_at
+    global combo_shield_active
+    global hammer_image_size
+
     current_difficulty = difficulty
     score = 0
     combo = 0
     successful_hits = 0
     game_running = False
+
+    # Every new game starts without any active power-ups.
+    golden_hammer_active = False
+    golden_hammer_ends_at = 0.0
+    combo_shield_active = False
+
+    # Make sure the normal hammer is rebuilt.
+    hammer_image_size = None
 
     refresh_high_score()
 
@@ -1765,17 +1885,17 @@ def create_game():
     global hud_score_id
     global hud_time_id
     global hud_high_id
-    global mole_image_source
     global mole_image_photo
     global mole_image_id
-    global mole_hit_image_source
     global hammer_image_source
+    global golden_hammer_image_source
     global hammer_image_photo
     global hammer_image_id
     global hammer_image_size
     global hammer_frame_photos
     global hammer_frame_index
     global hammer_animation_timer
+    global mole_image_sources
 
     # These two labels are never displayed (they are never packed) but other functions still update
     # them. They are kept so that code keeps working.
@@ -1848,15 +1968,64 @@ def create_game():
         anchor="center"
     )
 
-    mole_image_source = Image.open(
-        "Assets/Idle mole.png"
-    ).convert("RGBA")
+    # Load every mole type once when the game starts.
+    # Each entry contains its normal/up sprite and its hit sprite.
+    mole_image_sources.clear()
 
-    mole_hit_image_source = Image.open(
-        "Assets/Mole Hit.png"
-    ).convert("RGBA")
+    mole_image_sources.update({
+        "normal": {
+            "idle": Image.open(
+                "Assets/Idle mole.png"
+            ).convert("RGBA"),
 
-    menus.mole_source = mole_image_source   # shown peeking out of a hole on the home screen
+            "hit": Image.open(
+                "Assets/Mole Hit.png"
+            ).convert("RGBA")
+        },
+
+        "golden": {
+            "idle": Image.open(
+                "Assets/Golden Mole.png"
+            ).convert("RGBA"),
+
+            "hit": Image.open(
+                "Assets/Golden Mole Hit.png"
+            ).convert("RGBA")
+        },
+
+        "time": {
+            "idle": Image.open(
+                "Assets/Time Mole.png"
+            ).convert("RGBA"),
+
+            "hit": Image.open(
+                "Assets/Time Mole Hit.png"
+            ).convert("RGBA")
+        },
+
+        "combo": {
+            "idle": Image.open(
+                "Assets/Combo Mole.png"
+            ).convert("RGBA"),
+
+            "hit": Image.open(
+                "Assets/Combo Mole Hit.png"
+            ).convert("RGBA")
+        },
+
+        "ta": {
+            "idle": Image.open(
+                "Assets/TA Mole.png"
+            ).convert("RGBA"),
+
+            "hit": Image.open(
+                "Assets/TA Mole Hit.png"
+            ).convert("RGBA")
+        }
+    })
+
+    # Keep the normal mole on the home menu.
+    menus.mole_source = mole_image_sources["normal"]["idle"]
 
     mole_image_photo = None
 
@@ -1869,6 +2038,12 @@ def create_game():
 
     hammer_image_source = Image.open(
         "Assets/Hammer.png"
+    ).convert("RGBA")
+
+
+    # Golden version used during the Golden Mole power-up.
+    golden_hammer_image_source = Image.open(
+        "Assets/Golden Hammer.png"
     ).convert("RGBA")
 
     hammer_image_photo = None
@@ -1930,7 +2105,14 @@ def create_game():
 def poll_mouse():
     global cursor_x_m, cursor_y_m
 
-    sensors_connected = any(link is not None for link in box_links.values())
+    # Keep the Golden Hammer timer updated during mouse control.
+    if game_running:
+        update_golden_hammer()
+
+    sensors_connected = any(
+        link is not None
+        for link in box_links.values()
+    )
 
     if game_running and not sensors_connected:
 
@@ -2003,12 +2185,26 @@ def schedule_next_mole():
 # Show Mole
 # -------------------------
 
+# Chooses which type of mole should appear using the probabilities for
+# the current difficulty.
+def choose_mole_type():
+
+    chances = MOLE_SPAWN_CHANCES[current_difficulty]
+
+    # random.choices() lets each mole type have a different probability.
+    return random.choices(
+        population=list(chances.keys()),
+        weights=list(chances.values()),
+        k=1
+    )[0]
+
 # Picks a random hole, never the one the cursor is on, and starts the mole rising.
 def show_mole():
     global mole
     global mole_timer
     global mole_state
     global mole_visible_fraction
+    global current_mole_type
 
     if not game_running:
         return
@@ -2029,21 +2225,26 @@ def show_mole():
         if (h["row"], h["col"]) != cursor_cell
     ])
 
+    # Choose which gameplay mole will occupy the selected hole.
+    current_mole_type = choose_mole_type()
+
     mole_state = "rising"
     mole_visible_fraction = 0.0
     mole_timer = None
 
     animate_mole_rise()
 
-# -------------------------
-# Hide Mole
-# -------------------------
-
-# Called when an active mole's up-time runs out without it being hit: breaks the combo, recalculates
-# the difficulty, then the mole falls.
+# Called when an active mole disappears without being hit.
+#
+# Positive moles normally break the player's combo.
+# The TA is different because avoiding it is the correct action.
+#
+# A Combo Shield can protect the player from one genuine miss.
 def hide_mole():
+
     global mole_timer
     global combo
+    global combo_shield_active
 
     if mole is None:
         return
@@ -2051,14 +2252,21 @@ def hide_mole():
     if mole_state != "active":
         return
 
-    # If the mole disappears without being hit,
-    # the player's combo is broken
-    combo = 0
+    # Correctly avoiding the TA should not count as a miss.
+    if current_mole_type == "ta":
+        pass
 
-    # Recalculate difficulty after combo is reset
+    # One Combo Shield protects the current combo.
+    elif combo_shield_active:
+        combo_shield_active = False
+
+    # Any other missed mole resets the combo.
+    else:
+        combo = 0
+
+    # The combo change may also lower difficulty.
     update_difficulty()
 
-    # Update the display
     score_label.config(
         text=f"Score: {score} | Combo: {combo} | Level: {current_difficulty}"
     )
@@ -2073,11 +2281,22 @@ def hide_mole():
 # Whack Mole
 # -------------------------
 
-# Decides whether the cursor is hitting the mole. It runs whenever the cursor moves and when a mole
-# finishes rising. A hit needs an ACTIVE mole and the cursor within WHACK_RADIUS_M of the hole
-# centre. Points: the base score depends on reaction speed (how much of the mole's up-time was used)
-# and is multiplied by the combo multiplier. A hit also adds the time bonus, raises combo and hit
-# count, swings the hammer and shows the hit sprite.
+# Checks whether the cursor is close enough to hit the active mole.
+#
+# normal:
+#     normal reaction-time score
+#
+# golden:
+#     activates Golden Hammer and x2 scoring for five seconds
+#
+# time:
+#     adds five seconds to the round
+#
+# combo:
+#     gives +2 total combo and one Combo Shield
+#
+# ta:
+#     immediately ends the game
 def check_whack():
 
     global score
@@ -2089,86 +2308,182 @@ def check_whack():
     global successful_hits
     global time_remaining
 
-    # Only a fully raised, active mole can be hit
+    global golden_hammer_active
+    global golden_hammer_ends_at
+    global combo_shield_active
+    global hammer_image_size
+    global game_running
+
+    # Only a fully raised, active mole can be hit.
     if mole is None or mole_state != "active":
         return
 
     mole_x_m = mole["x_m"]
     mole_y_m = mole["y_m"]
+
     dx = cursor_x_m - mole_x_m
     dy = cursor_y_m - mole_y_m
-    distance_m = (dx*dx+dy*dy)**0.5
 
-    if distance_m <= WHACK_RADIUS_M:
-        # Check how quickly the active mole was hit.
-        elapsed_ms = (
-            time.monotonic() -
-            mole_active_started_at
-        ) * 1000
+    distance_m = (
+        dx * dx +
+        dy * dy
+    ) ** 0.5
 
-        if mole_active_duration_ms > 0:
-            reaction_fraction = (
-                elapsed_ms /
-                mole_active_duration_ms
-            )
-        else:
-            reaction_fraction = 1.0
+    # Stop here if the cursor is not close enough.
+    if distance_m > WHACK_RADIUS_M:
+        return
 
-        reaction_fraction = max(
-            0.0,
-            min(1.0, reaction_fraction)
-        )
+    # ---------------------------------------------------------
+    # TA / Bomb Mole
+    # ---------------------------------------------------------
 
-        # Faster hits award more points.
-        if reaction_fraction <= 0.25:  # hit within the first quarter of the up-time
-            points_earned = 100
-        elif reaction_fraction <= 0.50:  # within the first half
-            points_earned = 75
-        elif reaction_fraction <= 0.75:  # within the first three quarters
-            points_earned = 50
-        else:
-            points_earned = 25
+    # The TA is the dangerous mole.
+    # Hitting it ends the game immediately.
+    if current_mole_type == "ta":
 
-        successful_hits += 1
+        # Gameplay stops immediately.
+        game_running = False
 
-        # Increase combo after a consecutive successful hit
-        combo += 1
-
-        # Increase the remaining time by the hit time bonus, but do not exceed the maximum round duration
-        time_remaining = min(ROUND_DURATION, time_remaining + HIT_TIME_BONUS)
-
-        # Combo multiplies the reaction-time points (x1, x2, x3)
-        score += points_earned * get_hit_points()
-
-        # Check whether the difficulty level should increase
-        update_difficulty()
-
-        # Display the current score and difficulty level
-        score_label.config(
-            text=f"Score: {score} | Combo: {combo} | Level: {current_difficulty}"
-        )
-
-        draw_hud()
-
-        # IMPORTANT:
-        # Cancel the mole's existing timer
+        # Stop the normal mole timeout.
         if mole_timer is not None:
             root.after_cancel(mole_timer)
             mole_timer = None
 
-        start_hammer_strike()
-        audio.play_whack()
-        # Show the hit sprite before the mole falls
+        # Show the TA's hit sprite briefly.
         mole_state = "hit"
         mole_visible_fraction = 1.0
 
         draw_mole_sprite()
 
+        # Then open the normal game-over screen.
         mole_animation_timer = root.after(
             MOLE_HIT_DURATION_MS,
-            start_mole_fall
+            end_round
         )
 
+        return
+
+    # ---------------------------------------------------------
+    # Reaction-Time Score
+    # ---------------------------------------------------------
+
+    elapsed_ms = (
+        time.monotonic() -
+        mole_active_started_at
+    ) * 1000
+
+    if mole_active_duration_ms > 0:
+
+        reaction_fraction = (
+            elapsed_ms /
+            mole_active_duration_ms
+        )
+
+    else:
+        reaction_fraction = 1.0
+
+    reaction_fraction = max(
+        0.0,
+        min(1.0, reaction_fraction)
+    )
+
+    # Faster hits receive more base points.
+    if reaction_fraction <= 0.25:
+        points_earned = 100
+
+    elif reaction_fraction <= 0.50:
+        points_earned = 75
+
+    elif reaction_fraction <= 0.75:
+        points_earned = 50
+
+    else:
+        points_earned = 25
+
+    # Every positive mole counts as a successful hit.
+    successful_hits += 1
+
+    # Every successful hit adds one combo.
+    combo += 1
+
+    # ---------------------------------------------------------
+    # Special Mole Effects
+    # ---------------------------------------------------------
+
+    if current_mole_type == "golden":
+
+        # Start or refresh the five-second Golden Hammer.
+        golden_hammer_active = True
+
+        golden_hammer_ends_at = (
+            time.monotonic() +
+            GOLDEN_HAMMER_DURATION_S
+        )
+
+        # Force the hammer graphics to rebuild using the gold sprite.
+        hammer_image_size = None
+
+    elif current_mole_type == "time":
+
+        # Add five seconds without allowing the timer above 60.
+        time_remaining = min(
+            ROUND_DURATION,
+            time_remaining + TIME_MOLE_BONUS
+        )
+
+    elif current_mole_type == "combo":
+
+        # A normal successful hit already added +1.
+        # Add one more so this mole gives +2 total combo.
+        combo += 1
+
+        # Protect the combo from the next missed positive mole.
+        combo_shield_active = True
+
+    # ---------------------------------------------------------
+    # Scoring
+    # ---------------------------------------------------------
+
+    # Apply the normal x1 / x2 / x3 combo multiplier.
+    points_earned *= get_hit_points()
+
+    # While the Golden Hammer is active, all earned score is doubled.
+    if golden_hammer_active:
+        points_earned *= 2
+
+    score += points_earned
+
+    # Hits and combo changes may increase difficulty.
+    update_difficulty()
+
+    score_label.config(
+        text=f"Score: {score} | Combo: {combo} | Level: {current_difficulty}"
+    )
+
+    draw_hud()
+
+    # Stop the mole's normal timeout because it has been hit.
+    if mole_timer is not None:
+        root.after_cancel(mole_timer)
+        mole_timer = None
+
+    # Use the normal hammer animation for every positive mole.
+    start_hammer_strike()
+
+    # Keep the existing sound for now.
+    # Special sounds will be added later.
+    audio.play_whack()
+
+    # Show the correct hit sprite for this mole type.
+    mole_state = "hit"
+    mole_visible_fraction = 1.0
+
+    draw_mole_sprite()
+
+    mole_animation_timer = root.after(
+        MOLE_HIT_DURATION_MS,
+        start_mole_fall
+    )
 # Draws a thick red outline round the hole the cursor is over and removes it from the others. Only
 # during a round.
 def update_cursor_indicator():
