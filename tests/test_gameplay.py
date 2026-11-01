@@ -100,6 +100,7 @@ class TestGameplay(unittest.TestCase):
                     "successful_hits": 0,
                     "current_difficulty": "Easy",
                     "game_running": False,
+                    "game_paused": False,
 
                     "mole": {"x_m": 0.5, "y_m": 0.7},
                     "mole_state": "active",
