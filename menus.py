@@ -1,7 +1,7 @@
 """
 menus.py (v3) - FULL-SCREEN menu screens plus a gate transition, drawn on the game canvas.
 
-Screens: home, leaderboard, how to play, game over (with initials entry). Each one
+Screens: home, leaderboard, how to play, mole guide, game over (with initials entry). Each one
 covers the whole window (radial-gradient background, hazard-stripe bars top and
 bottom, content scaled to the window). The home screen uses a two-column layout on
 wide windows and a stacked one on tall windows.
@@ -42,11 +42,21 @@ TRANSITION_FRAME_MS = 15  # delay between animation frames (15 ms is about 66 pe
 # Edit freely; keep in sync with the game rules.
 # Each string is one bullet point on the HOW TO PLAY screen (long lines wrap automatically). Keep
 # them in step with the real game rules.
+# Border / label colour for each kind of mole on the MOLE GUIDE screen. The keys match the mole
+# types in the game ("normal", "golden", "time", "combo", "ta"); any other key falls back to AMBER.
+MOLE_ACCENTS = {
+    "normal": "#FFB81C",   # amber: the standard target
+    "golden": "#FFD54A",   # gold: power-up
+    "time": "#6EC6FF",     # light blue: clock bonus
+    "combo": "#FF8A1F",    # orange: combo power-up
+    "ta": "#FF6A1A",       # red-orange: danger, avoid
+}
+
 HELP_TIPS = [
     "Step up to a hole to aim. Your position moves the hammer.",
     "Whack a mole while it is up. Faster hits score more (100 down to 25).",
     "Chain hits for a combo: x2 from 3 in a row, x3 from 5.",
-    "Every hit adds 1 second to the clock. A miss resets your combo.",
+    "A missed mole resets your combo. Only Time Moles add seconds to the clock.",
     "Stay at least 60 cm from the screen or the game will warn you.",
 ]
 
@@ -117,11 +127,15 @@ class MenuManager:
         self.max_entries = max_entries
 
         self.mole_source = None        # optional PIL RGBA image shown on the home screen
+        # Entries for the MOLE GUIDE screen, supplied by the game (so the text can use the game's own
+        # numbers). Each is a dict: key, name, tag, text, seen and image (a PIL RGBA picture). While
+        # this list is empty the MOLE GUIDE button is simply not shown.
+        self.mole_info = []
         self.clock = time.monotonic    # replaceable, for testing
 
         self.visible = False  # True while a menu screen is on the canvas
         self.transitioning = False  # True while the gates are moving (input is ignored)
-        self.screen = "home"  # which screen: "home", "scores", "help" or "over"
+        self.screen = "home"  # which screen: "home", "scores", "help", "moles" or "over"
         self.buttons = []  # clickable buttons on this screen: dicts of label, action, rect
         self.selected = 0  # index of the highlighted button (keyboard or hover)
 
@@ -138,8 +152,7 @@ class MenuManager:
         self._w = self._h = 1  # canvas size at the last render
         self._bg_photo = None  # cached gradient background image
         self._bg_size = None  # the size that cached background was built for
-        self._mole_photo = None  # cached resized mole picture for the home screen
-        self._mole_key = None  # the size that mole picture was built for
+        self._sprite_cache = {}  # resized mole pictures, keyed by (picture id, width, height)
         self._tr_token = 0  # bumped to cancel a transition that is in progress
         self._gate_off = 0.0  # how far the gates have travelled so far (pixels)
         self._gate_dist = 0.0  # total distance each gate travels to meet in the middle
@@ -165,6 +178,11 @@ class MenuManager:
     # Opens the how-to-play screen.
     def show_help(self):
         self._open("help")
+
+    # Opens the mole guide screen (one card per kind of mole: picture, what it does, where it
+    # appears). The entries come from self.mole_info, which the game fills in.
+    def show_moles(self):
+        self._open("moles")
 
     # Opens the game-over screen for `score`. First works out the rank, whether the score qualifies
     # for the leaderboard and whether it is a new high score (before anything is saved).
@@ -216,7 +234,8 @@ class MenuManager:
         cw = min(w * 0.86, ph * 1.25)         # content width for the single-column screens
         self.buttons = []
         draw = {"home": self._draw_home, "scores": self._draw_scores,
-                "help": self._draw_help, "over": self._draw_over}[self.screen]
+                "help": self._draw_help, "moles": self._draw_moles,
+                "over": self._draw_over}[self.screen]
         draw(c, w / 2, top, ph, cw)
         self._draw_buttons(c, ph)
 
@@ -448,22 +467,30 @@ class MenuManager:
     # standing inside. `max_h` stops the mole growing up into the title above it.
     def _hole_and_mole(self, c, cx, cy, hole_w, max_h=None):
         """A hole with the mole peeking out of it (the hole's front lip is drawn over the mole)."""
+        self._hole_and_sprite(c, cx, cy, hole_w, self.mole_source, max_h)
+
+    # The same hole-and-sprite drawing for ANY mole picture (the home screen uses the normal mole,
+    # the MOLE GUIDE uses one per card). `image` is a PIL RGBA picture or None (hole only). The
+    # resized copy is cached so redrawing on every window resize stays cheap.
+    def _hole_and_sprite(self, c, cx, cy, hole_w, image, max_h=None):
         hole_h = hole_w * 0.34
         box = (cx - hole_w / 2, cy - hole_h / 2, cx + hole_w / 2, cy + hole_h / 2)
         rim = "#3a342b"
         c.create_oval(*box, fill="#000000", outline=rim, width=4)
-        if self.mole_source is not None:
+        if image is not None:
             mw = max(1, int(hole_w * 0.9))
-            sw, sh = self.mole_source.size
+            sw, sh = image.size
             mh = max(1, int(mw * sh / sw))
             if max_h is not None and mh > max_h:      # keep clear of whatever is above
                 mh = max(1, int(max_h))
                 mw = max(1, int(mh * sw / sh))
-            if self._mole_key != (mw, mh):
-                self._mole_photo = ImageTk.PhotoImage(
-                    self.mole_source.resize((mw, mh), Image.Resampling.LANCZOS))
-                self._mole_key = (mw, mh)
-            c.create_image(cx, cy + hole_h * 0.25, anchor="s", image=self._mole_photo)
+            key = (id(image), mw, mh)
+            if key not in self._sprite_cache:
+                if len(self._sprite_cache) > 60:      # bounded: resizing the window makes new sizes
+                    self._sprite_cache.clear()
+                self._sprite_cache[key] = ImageTk.PhotoImage(
+                    image.resize((mw, mh), Image.Resampling.LANCZOS))
+            c.create_image(cx, cy + hole_h * 0.25, anchor="s", image=self._sprite_cache[key])
         c.create_arc(*box, start=180, extent=180, style="pieslice", fill="#000000", outline="")
         c.create_arc(*box, start=180, extent=180, style="arc", outline=rim, width=4)
 
@@ -511,14 +538,14 @@ class MenuManager:
             xl, xr = w * 0.29, w * 0.71
             title_y, plate_y, hole_y, hole_w = top + ph * 0.27, top + ph * 0.43, top + ph * 0.80, ph * 0.30
             tsize, plate_w = min(ph * 0.17, w * 0.08), min(w * 0.36, ph * 0.85)
-            btn_cx, btn_y, btn_cw, btn_h = xr, top + ph * 0.26, min(w * 0.40, ph * 1.0), 0.12
+            btn_cx, btn_y, btn_cw, btn_h = xr, top + ph * 0.22, min(w * 0.40, ph * 1.0), 0.105
             hs_x, hs_y = xr, top + ph * 0.78
         else:         # stacked
             xl = btn_cx = hs_x = w / 2
             title_y, plate_y, hole_y, hole_w = top + ph * 0.10, top + ph * 0.19, top + ph * 0.46, ph * 0.18
             tsize, plate_w = min(ph * 0.09, w * 0.13), min(w * 0.70, ph * 0.5)
-            btn_y, btn_cw, btn_h = top + ph * 0.55, min(w * 0.80, ph * 0.70), 0.08
-            hs_y = top + ph * 0.885
+            btn_y, btn_cw, btn_h = top + ph * 0.53, min(w * 0.80, ph * 0.70), 0.065
+            hs_y = top + ph * 0.90
 
         self._title(c, xl, title_y, "ENGG3000", tsize)
         psize = min(ph * 0.06, plate_w * 0.13)
@@ -530,10 +557,12 @@ class MenuManager:
         mole_room = (hole_y + hole_h * 0.25) - (plate_y + psize * 0.85 + ph * 0.015)
         self._hole_and_mole(c, xl, hole_y, hole_w, max_h=mole_room)
 
-        self._add_buttons([("START GAME", self.on_start),
-                           ("LEADERBOARD", self.show_leaderboard),
-                           ("HOW TO PLAY", self.show_help)],
-                          btn_y, ph, btn_cw, btn_cx, height=btn_h, width_f=0.86)
+        home_buttons = [("START GAME", self.on_start),
+                        ("LEADERBOARD", self.show_leaderboard),
+                        ("HOW TO PLAY", self.show_help)]
+        if self.mole_info:                       # the guide needs the game to have supplied entries
+            home_buttons.append(("MOLE GUIDE", self.show_moles))
+        self._add_buttons(home_buttons, btn_y, ph, btn_cw, btn_cx, height=btn_h, width_f=0.86)
         best = max((e.get("score", 0) for e in self.get_scores()), default=0)
         self._text(c, hs_x, hs_y, f"HIGH SCORE  {best}", ph * 0.045, DIM)
         self._text(c, w / 2, top + ph * 0.94, "Up/Down + Enter    F11 fullscreen    Esc menu",
@@ -568,6 +597,77 @@ class MenuManager:
             self._text(c, cx - pw * 0.40, top + ph * (0.20 + i * 0.095), "- " + tip,
                        ph * 0.032, CREAM, BODY, anchor="nw", width=pw * 0.8, justify="left")
         self._add_buttons([("BACK", self.show_home)], top + ph * 0.78, ph, pw, cx)
+
+    # Mole guide screen: one card per entry in self.mole_info showing the mole's picture, a coloured
+    # label (what kind of mole it is), its name, what it does and which difficulty levels it
+    # appears on. On a wide window the cards sit side by side; on a tall window they stack as rows
+    # (picture on the left, text on the right). Colours come from MOLE_ACCENTS.
+    def _draw_moles(self, c, cx, top, ph, pw):
+        w, h = self._w, self._h
+        wide = w >= h * 1.25
+        info = self.mole_info
+        n = max(1, len(info))
+        self._title(c, cx, top + ph * 0.09, "MOLE GUIDE", ph * 0.08)
+        self._text(c, cx, top + ph * 0.165, "KNOW YOUR TARGETS", ph * 0.028, ORANGE)
+
+        if wide:
+            # Cards side by side across ~92% of the window width.
+            gap = w * 0.012
+            card_w = (w * 0.92 - gap * (n - 1)) / n
+            left = w * 0.04
+            y0, y1 = top + ph * 0.21, top + ph * 0.80
+            for i, entry in enumerate(info):
+                x0 = left + i * (card_w + gap)
+                self._mole_card(c, entry, x0, y0, x0 + card_w, y1, ph)
+            back_y = top + ph * 0.86
+        else:
+            # Rows stacked down the window, each a picture + text strip.
+            gap = ph * 0.012
+            row_h = (ph * 0.675 - gap * (n - 1)) / n
+            x0, x1 = w * 0.05, w * 0.95
+            for i, entry in enumerate(info):
+                y0 = top + ph * 0.19 + i * (row_h + gap)
+                self._mole_row(c, entry, x0, y0, x1, y0 + row_h, ph)
+            back_y = top + ph * 0.885
+        self._add_buttons([("BACK", self.show_home)], back_y, ph, pw, cx, height=0.075)
+
+    # One card of the wide mole guide: label chip, picture in a hole, name, description, "seen on".
+    def _mole_card(self, c, entry, x0, y0, x1, y1, ph):
+        accent = MOLE_ACCENTS.get(entry.get("key"), AMBER)
+        cw, chh = x1 - x0, y1 - y0
+        mid = (x0 + x1) / 2
+        pad = cw * 0.07
+        c.create_rectangle(x0, y0, x1, y1, fill=PANEL_BG, outline=accent, width=3)
+        # label chip across the top (e.g. POWER-UP, AVOID!)
+        chip_h = chh * 0.085
+        c.create_rectangle(x0, y0, x1, y0 + chip_h * 1.6, fill=accent, outline="")
+        self._text(c, mid, y0 + chip_h * 0.8, entry.get("tag", ""), chip_h * 1.05, DARK)
+        # picture: a hole with this mole peeking out of it
+        hole_w = cw * 0.62
+        hole_cy = y0 + chh * 0.40
+        self._hole_and_sprite(c, mid, hole_cy, hole_w, entry.get("image"),
+                              max_h=(hole_cy + hole_w * 0.085) - (y0 + chip_h * 1.6 + chh * 0.02))
+        # name, then the description (wraps inside the card), then where it appears
+        self._text(c, mid, y0 + chh * 0.535, entry.get("name", ""), ph * 0.04, accent)
+        self._text(c, x0 + pad, y0 + chh * 0.60, entry.get("text", ""), ph * 0.027, CREAM, BODY,
+                   anchor="nw", width=cw - 2 * pad, justify="left")
+        self._text(c, mid, y1 - chh * 0.055, entry.get("seen", ""), ph * 0.022, DIM, BODY)
+
+    # One row of the tall mole guide: picture on the left, name + label + text on the right.
+    def _mole_row(self, c, entry, x0, y0, x1, y1, ph):
+        accent = MOLE_ACCENTS.get(entry.get("key"), AMBER)
+        rh = y1 - y0
+        c.create_rectangle(x0, y0, x1, y1, fill=PANEL_BG, outline=accent, width=3)
+        img_w = rh * 1.05
+        self._hole_and_sprite(c, x0 + img_w / 2 + rh * 0.06, y0 + rh * 0.74, img_w * 0.9,
+                              entry.get("image"), max_h=rh * 0.80)
+        tx = x0 + img_w + rh * 0.22
+        self._text(c, tx, y0 + rh * 0.21, entry.get("name", ""), ph * 0.031, accent, anchor="w")
+        self._text(c, x1 - rh * 0.1, y0 + rh * 0.21, entry.get("tag", ""), ph * 0.021, accent,
+                   anchor="e")
+        self._text(c, tx, y0 + rh * 0.36, entry.get("text", ""), ph * 0.0205, CREAM, BODY,
+                   anchor="nw", width=(x1 - tx) - rh * 0.15, justify="left")
+        self._text(c, tx, y1 - rh * 0.13, entry.get("seen", ""), ph * 0.017, DIM, BODY, anchor="w")
 
     # Game-over screen. Top: the score box with a note (new high score / rank / try again). If the
     # score qualifies and has not been saved yet, an initials box and a SAVE SCORE button appear;

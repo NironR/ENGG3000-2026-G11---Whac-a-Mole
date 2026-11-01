@@ -1866,6 +1866,59 @@ def begin_round():
     round_timer_id = root.after(1000, tick_round_timer)
     audio.play_music(current_difficulty)
 # -------------------------
+# Mole Guide Text
+# -------------------------
+# Builds the entries shown on the MOLE GUIDE menu screen (one per mole type). The wording is
+# generated from the game's own constants, so if you retune TIME_MOLE_BONUS, GOLDEN_HAMMER_DURATION_S,
+# ROUND_DURATION or MOLE_SPAWN_CHANCES the guide updates itself. Each entry: key (the mole type),
+# name, tag (the coloured label), text (what it does), seen (which levels it appears on) and image
+# (the mole's up sprite). To add a new mole type, add a line here and give it a MOLE_ACCENTS colour
+# in menus.py.
+def build_mole_info():
+
+    # "ALL LEVELS", or e.g. "MEDIUM + HARD ONLY" when a mole has a 0% chance on some levels.
+    def seen_on(mole_type):
+        levels = [
+            level for level in ("Easy", "Medium", "Hard")
+            if MOLE_SPAWN_CHANCES[level].get(mole_type, 0) > 0
+        ]
+
+        if len(levels) == 3:
+            return "ALL LEVELS"
+
+        return " + ".join(levels).upper() + " ONLY"
+
+    entries = [
+        ("normal", "NORMAL MOLE", "TARGET",
+         "Hit it fast: 100 down to 25 points. Miss one and your combo resets."),
+
+        ("golden", "GOLDEN MOLE", "POWER-UP",
+         f"Grants the Golden Hammer: double points for {GOLDEN_HAMMER_DURATION_S} seconds."),
+
+        ("time", "TIME MOLE", "BONUS",
+         f"Adds {TIME_MOLE_BONUS} seconds to the clock (never above {ROUND_DURATION})."),
+
+        ("combo", "COMBO MOLE", "POWER-UP",
+         "Gives +2 combo, plus a shield that saves your combo from one miss."),
+
+        ("ta", "TA MOLE", "AVOID!",
+         "Do NOT hit it! Hitting it ends the game at once. Let it hide, that is safe."),
+    ]
+
+    return [
+        {
+            "key": key,
+            "name": name,
+            "tag": tag,
+            "text": text,
+            "seen": seen_on(key),
+            "image": mole_image_sources[key]["idle"]
+        }
+        for key, name, tag, text in entries
+        if key in mole_image_sources
+    ]
+
+# -------------------------
 # Create Game
 # -------------------------
 # Runs once at startup now: the canvas, sprites and menus all persist.
@@ -2026,6 +2079,9 @@ def create_game():
 
     # Keep the normal mole on the home menu.
     menus.mole_source = mole_image_sources["normal"]["idle"]
+
+    # Pictures and descriptions for the MOLE GUIDE menu screen.
+    menus.mole_info = build_mole_info()
 
     mole_image_photo = None
 
@@ -2679,4 +2735,3 @@ root.after(50, poll_sensor)
 root.after(5, poll_mouse)
 # Hand control to Tk. From here the game runs entirely from the scheduled callbacks above.
 root.mainloop()
-
