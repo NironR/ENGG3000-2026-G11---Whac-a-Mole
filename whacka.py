@@ -10,7 +10,10 @@
 # FILES THIS NEEDS (keep them in the same folder)
 #   menus.py     all menu screens, the gate transition and the blurred backdrop
 #   boxes.py     serial helpers for the sensor boxes (optional: no boxes = mouse mode)
-#   Assets/      Arcade Machine.png, Idle mole.png, Mole Hit.png, Hammer.png
+#   audio.py     music and sound effects (Windows only; silent on other systems)
+#   Assets/      Arcade Machine.png, Idle mole.png, Mole Hit.png, Hammer.png, TA Angry.png, ...
+#   Assets/Audio/  background_*.mp3, Menu Music.mp3, mole_whack.mp3, Game Over.wav,
+#                  Golden Hammer wack.wav, Iain Scream.ogg
 #   leaderboard.json is created next to this file the first time a score is saved.
 #
 # HOW TO READ THIS FILE (top to bottom)
@@ -98,6 +101,10 @@ successful_hits = 0  # moles hit this round; drives difficulty (8 = Medium, 20 =
 mole = None  # hole record the current mole is in, or None if no mole is out
 # True only DURING a round (not menus/countdown); most functions do nothing when False
 game_running = False
+
+# True when the round was ended by hitting Iain (the TA mole) instead of running out of time. Decides
+# which game-over screen end_round() shows (the Iain one never saves the score). Reset in start_game.
+game_ended_by_ta = False
 
 # Timer IDs
 mole_timer = None  # after() id: ends the mole's up-time (hide_mole)
@@ -433,7 +440,7 @@ MOLE_SPAWN_CHANCES = {
         "golden": 0.04,
         "time": 0.04,
         "combo": 0.02,
-        "ta": 0.0
+        "ta": 1
     },
 
     "Medium": {
@@ -1753,6 +1760,45 @@ def clear_cursor_indicator():
         )
 
 
+# -------------------------
+# Menu and game-over audio
+# -------------------------
+# Bumped every time menu audio is (re)started or cancelled. A delayed sound (the Game Over jingle,
+# then the menu music after it) only plays if the token it was created with is still current, so
+# starting a new game cancels anything still waiting.
+menu_audio_token = 0
+
+# Starts the looping menu music right away (nothing happens if it is already playing). The music
+# keeps playing as the player moves between menu screens; it is replaced by the game music when a
+# round begins (begin_round) and stopped when a round ends (end_round).
+def start_menu_music():
+    global menu_audio_token
+    menu_audio_token += 1   # cancels any jingle/music still waiting to start
+    audio.play_music("Menu")
+
+# Plays the Game Over jingle (after `wait_ms`, which lets Iain's scream finish first), then starts
+# the menu music once the jingle has ended so the two never overlap.
+def play_game_over_then_menu_music(wait_ms=0):
+    global menu_audio_token
+    menu_audio_token += 1
+    token = menu_audio_token
+
+    def begin_music():
+        if token == menu_audio_token:
+            audio.play_music("Menu")
+
+    def play_jingle():
+        if token != menu_audio_token:
+            return
+        jingle_ms = audio.play_effect("gameover")   # its length in ms (0 if it cannot play)
+        root.after(jingle_ms, begin_music)
+
+    if wait_ms > 0:
+        root.after(wait_ms, play_jingle)
+    else:
+        play_jingle()
+
+
 # Puts the playfield into its idle look just before a menu appears: refreshes the high score,
 # removes any banner and outline, hides the hammer and redraws the HUD.
 def enter_menu_state():
@@ -1778,6 +1824,7 @@ def start_menu():
 
     enter_menu_state()
     menus.show_home()
+    start_menu_music()
 
 # -------------------------
 # Start Game
@@ -1799,6 +1846,8 @@ def start_game(difficulty):
     global golden_hammer_ends_at
     global combo_shield_active
     global hammer_image_size
+    global game_ended_by_ta
+    global menu_audio_token
 
     current_difficulty = difficulty
     score = 0
@@ -1813,6 +1862,16 @@ def start_game(difficulty):
 
     # Make sure the normal hammer is rebuilt.
     hammer_image_size = None
+
+    # A new round has not been ended by Iain yet.
+    game_ended_by_ta = False
+
+    # Cancel any menu audio still waiting to start and cut off the end-of-game sounds. The menu
+    # music itself keeps playing through the gates and the countdown, and is replaced by the game
+    # music when the round begins.
+    menu_audio_token += 1
+    audio.stop_effect("gameover")
+    audio.stop_effect("iain")
 
     refresh_high_score()
 
@@ -1901,8 +1960,8 @@ def build_mole_info():
         ("combo", "COMBO MOLE", "POWER-UP",
          "Gives +2 combo, plus a shield that saves your combo from one miss."),
 
-        ("ta", "TA MOLE", "AVOID!",
-         "Do NOT hit it! Hitting it ends the game at once. Let it hide, that is safe."),
+        ("ta", "IAIN", "AVOID!",
+         "Never hit him! Hitting Iain ends the game instantly. Let him hide."),
     ]
 
     return [
@@ -2082,6 +2141,13 @@ def create_game():
 
     # Pictures and descriptions for the MOLE GUIDE menu screen.
     menus.mole_info = build_mole_info()
+
+    # Angry Iain, shown on the special game-over screen after hitting the TA mole. If the file is
+    # missing the screen still works, just without the picture.
+    try:
+        menus.ta_angry_image = Image.open("Assets/TA Angry.png").convert("RGBA")
+    except FileNotFoundError:
+        menus.ta_angry_image = None
 
     mole_image_photo = None
 
@@ -2369,6 +2435,7 @@ def check_whack():
     global combo_shield_active
     global hammer_image_size
     global game_running
+    global game_ended_by_ta
 
     # Only a fully raised, active mole can be hit.
     if mole is None or mole_state != "active":
@@ -2399,6 +2466,13 @@ def check_whack():
 
         # Gameplay stops immediately.
         game_running = False
+
+        # Remember WHY the round ended, so end_round() shows the special Iain game-over screen
+        # (which never saves the score).
+        game_ended_by_ta = True
+
+        # Iain screams just before the game ends.
+        audio.play_effect("iain")
 
         # Stop the normal mole timeout.
         if mole_timer is not None:
@@ -2526,9 +2600,11 @@ def check_whack():
     # Use the normal hammer animation for every positive mole.
     start_hammer_strike()
 
-    # Keep the existing sound for now.
-    # Special sounds will be added later.
-    audio.play_whack()
+    # The Golden Hammer has its own whack sound while it is active; otherwise the normal one.
+    if golden_hammer_active:
+        audio.play_effect("golden")
+    else:
+        audio.play_whack()
 
     # Show the correct hit sprite for this mole type.
     mole_state = "hit"
@@ -2625,7 +2701,11 @@ def end_round():
         mole_visible_fraction = 0.0
         draw_mole_sprite()
 
-    show_game_over()
+    # Hitting Iain gets its own game-over screen (no score saved); anything else the normal one.
+    if game_ended_by_ta:
+        show_ta_game_over()
+    else:
+        show_game_over()
 
 # -------------------------
 # Game Over
@@ -2635,7 +2715,17 @@ def end_round():
 # Hands over to the full-screen game-over menu with the final score.
 def show_game_over():
     enter_menu_state()
+    play_game_over_then_menu_music()
     menus.show_game_over(score)
+
+# The special game over after hitting Iain. Nothing is saved: the screen has no initials box. Iain's
+# scream started when he was hit, so the Game Over jingle waits for the rest of it, then the menu
+# music follows.
+def show_ta_game_over():
+    enter_menu_state()
+    scream_left_ms = max(0, audio.effect_length_ms("iain") - MOLE_HIT_DURATION_MS)
+    play_game_over_then_menu_music(scream_left_ms)
+    menus.show_ta_game_over(score)
 
 # Leftover helper that refreshes the debug read-out with the grid cell; it is not scheduled anywhere
 # at the moment.

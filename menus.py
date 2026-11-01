@@ -1,7 +1,8 @@
 """
 menus.py (v3) - FULL-SCREEN menu screens plus a gate transition, drawn on the game canvas.
 
-Screens: home, leaderboard, how to play, mole guide, game over (with initials entry). Each one
+Screens: home, leaderboard, how to play, mole guide, game over (with initials entry), and a
+special game over for hitting Iain (the TA mole; the score is not saved). Each one
 covers the whole window (radial-gradient background, hazard-stripe bars top and
 bottom, content scaled to the window). The home screen uses a two-column layout on
 wide windows and a stacked one on tall windows.
@@ -42,6 +43,9 @@ TRANSITION_FRAME_MS = 15  # delay between animation frames (15 ms is about 66 pe
 # Edit freely; keep in sync with the game rules.
 # Each string is one bullet point on the HOW TO PLAY screen (long lines wrap automatically). Keep
 # them in step with the real game rules.
+# Wording of the special game-over screen shown when the player hits Iain (the TA mole).
+TA_GAME_OVER_MESSAGE = "You've hit Iain, why did you do that?"
+
 # Border / label colour for each kind of mole on the MOLE GUIDE screen. The keys match the mole
 # types in the game ("normal", "golden", "time", "combo", "ta"); any other key falls back to AMBER.
 MOLE_ACCENTS = {
@@ -131,11 +135,14 @@ class MenuManager:
         # numbers). Each is a dict: key, name, tag, text, seen and image (a PIL RGBA picture). While
         # this list is empty the MOLE GUIDE button is simply not shown.
         self.mole_info = []
+        # Picture for the special "you hit Iain" game-over screen (Assets/TA Angry.png), supplied by
+        # the game. If it is None the screen is shown with a big "!" in the frame instead.
+        self.ta_angry_image = None
         self.clock = time.monotonic    # replaceable, for testing
 
         self.visible = False  # True while a menu screen is on the canvas
         self.transitioning = False  # True while the gates are moving (input is ignored)
-        self.screen = "home"  # which screen: "home", "scores", "help", "moles" or "over"
+        self.screen = "home"  # which screen: "home", "scores", "help", "moles", "over" or "ta_over"
         self.buttons = []  # clickable buttons on this screen: dicts of label, action, rect
         self.selected = 0  # index of the highlighted button (keyboard or hover)
 
@@ -183,6 +190,13 @@ class MenuManager:
     # appears). The entries come from self.mole_info, which the game fills in.
     def show_moles(self):
         self._open("moles")
+
+    # Opens the special game-over screen for hitting Iain (the TA mole). There is no initials box
+    # and nothing is saved: the screen only offers PLAY AGAIN and MAIN MENU. `score` (optional) is
+    # shown with a "not saved" note.
+    def show_ta_game_over(self, score=None):
+        self.final_score = score
+        self._open("ta_over")
 
     # Opens the game-over screen for `score`. First works out the rank, whether the score qualifies
     # for the leaderboard and whether it is a new high score (before anything is saved).
@@ -235,7 +249,7 @@ class MenuManager:
         self.buttons = []
         draw = {"home": self._draw_home, "scores": self._draw_scores,
                 "help": self._draw_help, "moles": self._draw_moles,
-                "over": self._draw_over}[self.screen]
+                "over": self._draw_over, "ta_over": self._draw_ta_over}[self.screen]
         draw(c, w / 2, top, ph, cw)
         self._draw_buttons(c, ph)
 
@@ -469,6 +483,18 @@ class MenuManager:
         """A hole with the mole peeking out of it (the hole's front lip is drawn over the mole)."""
         self._hole_and_sprite(c, cx, cy, hole_w, self.mole_source, max_h)
 
+    # Returns a Tk copy of `image` resized to w x h pixels. Resizing is slow, so each (picture,
+    # size) is done once and kept; the cache is emptied if it grows (new sizes appear whenever the
+    # window is resized).
+    def _sprite_photo(self, image, w, h):
+        key = (id(image), w, h)
+        if key not in self._sprite_cache:
+            if len(self._sprite_cache) > 60:
+                self._sprite_cache.clear()
+            self._sprite_cache[key] = ImageTk.PhotoImage(
+                image.resize((w, h), Image.Resampling.LANCZOS))
+        return self._sprite_cache[key]
+
     # The same hole-and-sprite drawing for ANY mole picture (the home screen uses the normal mole,
     # the MOLE GUIDE uses one per card). `image` is a PIL RGBA picture or None (hole only). The
     # resized copy is cached so redrawing on every window resize stays cheap.
@@ -484,13 +510,8 @@ class MenuManager:
             if max_h is not None and mh > max_h:      # keep clear of whatever is above
                 mh = max(1, int(max_h))
                 mw = max(1, int(mh * sw / sh))
-            key = (id(image), mw, mh)
-            if key not in self._sprite_cache:
-                if len(self._sprite_cache) > 60:      # bounded: resizing the window makes new sizes
-                    self._sprite_cache.clear()
-                self._sprite_cache[key] = ImageTk.PhotoImage(
-                    image.resize((mw, mh), Image.Resampling.LANCZOS))
-            c.create_image(cx, cy + hole_h * 0.25, anchor="s", image=self._sprite_cache[key])
+            photo = self._sprite_photo(image, mw, mh)
+            c.create_image(cx, cy + hole_h * 0.25, anchor="s", image=photo)
         c.create_arc(*box, start=180, extent=180, style="pieslice", fill="#000000", outline="")
         c.create_arc(*box, start=180, extent=180, style="arc", outline=rim, width=4)
 
@@ -668,6 +689,52 @@ class MenuManager:
         self._text(c, tx, y0 + rh * 0.36, entry.get("text", ""), ph * 0.0205, CREAM, BODY,
                    anchor="nw", width=(x1 - tx) - rh * 0.15, justify="left")
         self._text(c, tx, y1 - rh * 0.13, entry.get("seen", ""), ph * 0.017, DIM, BODY, anchor="w")
+
+    # Special game over for hitting Iain: the angry picture in a red frame, the message, a "score not
+    # saved" note and two buttons (PLAY AGAIN, MAIN MENU). On a wide window the picture is on the
+    # left and the text and buttons on the right; on a tall window everything stacks.
+    def _draw_ta_over(self, c, cx, top, ph, pw):
+        w, h = self._w, self._h
+        wide = w >= h * 1.25
+        if wide:
+            xl, xr = w * 0.29, w * 0.71
+            box_w, box_h, pic_cy = min(w * 0.40, ph * 0.80), ph * 0.80, top + ph * 0.50
+            title_y, title_size = top + ph * 0.13, min(ph * 0.11, w * 0.06)
+            msg_y, msg_size, col_w = top + ph * 0.37, min(ph * 0.07, w * 0.038), w * 0.40
+            note_y, btn_y, btn_h = top + ph * 0.58, top + ph * 0.66, 0.11
+            btn_cw = min(w * 0.40, ph * 1.0)
+        else:
+            xl = xr = w / 2
+            box_w, box_h, pic_cy = min(w * 0.80, ph * 0.50), ph * 0.36, top + ph * 0.33
+            title_y, title_size = top + ph * 0.08, ph * 0.085
+            msg_y, msg_size, col_w = top + ph * 0.62, min(ph * 0.05, w * 0.075), w * 0.84
+            note_y, btn_y, btn_h = top + ph * 0.73, top + ph * 0.78, 0.08
+            btn_cw = min(w * 0.80, ph * 0.70)
+
+        # Picture: scaled to fit the box without stretching, with a red "danger" frame hugging it.
+        pad = ph * 0.015
+        img = self.ta_angry_image
+        if img is not None:
+            iw, ih = img.size
+            scale = min((box_w - 2 * pad) / iw, (box_h - 2 * pad) / ih)
+            pw_px, ph_px = max(1, int(iw * scale)), max(1, int(ih * scale))
+        else:
+            pw_px, ph_px = int(box_w * 0.6), int(box_h - 2 * pad)
+        c.create_rectangle(xl - pw_px / 2 - pad, pic_cy - ph_px / 2 - pad,
+                           xl + pw_px / 2 + pad, pic_cy + ph_px / 2 + pad,
+                           fill="#0b0907", outline=RED, width=4)
+        if img is not None:
+            c.create_image(xl, pic_cy, image=self._sprite_photo(img, pw_px, ph_px))
+        else:
+            self._text(c, xl, pic_cy, "!", ph_px * 0.8, RED)
+
+        self._title(c, xr, title_y, "GAME OVER", title_size, RED, "#8A2F00")
+        self._text(c, xr, msg_y, TA_GAME_OVER_MESSAGE, msg_size, CREAM, width=col_w, justify="center")
+        note = "YOUR SCORE WAS NOT SAVED" if self.final_score is None \
+            else f"YOUR SCORE OF {self.final_score} WAS NOT SAVED"
+        self._text(c, xr, note_y, note, ph * 0.03, DIM)
+        self._add_buttons([("PLAY AGAIN", self.on_start), ("MAIN MENU", self.show_home)],
+                          btn_y, ph, btn_cw, xr, height=btn_h, width_f=0.86)
 
     # Game-over screen. Top: the score box with a note (new high score / rank / try again). If the
     # score qualifies and has not been saved yet, an initials box and a SAVE SCORE button appear;
