@@ -2419,4 +2419,3 @@ root.after(50, poll_sensor)
 root.after(5, poll_mouse)
 # Hand control to Tk. From here the game runs entirely from the scheduled callbacks above.
 root.mainloop()
-
