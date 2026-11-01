@@ -465,11 +465,8 @@ MOLE_SPAWN_CHANCES = {
     }
 }
 
-# Resized mole frames are cached so large PNG files do not need to be
-# resized every time a mole appears.
-mole_resize_cache = {}
-
-# Resized mole frames, keyed by (is_hit, width, height), so the sprite isn't re-resized every animation step
+# Resized mole frames, keyed by (mole type, is_hit, width, height), so the sprite isn't re-resized
+# every animation step
 mole_resize_cache = {}
 
 # The mole is a small state machine:
@@ -495,6 +492,7 @@ hammer_image_id = None  # canvas item id of the hammer sprite
 hammer_image_size = None  # (w, h) the cached frames were built for; rebuilt only if this changes
 
 hammer_frame_photos = []  # pre-rotated frames, one per angle in HAMMER_STRIKE_ANGLES
+hammer_frames_cache = {}  # (golden?, width, height) -> that hammer's frames, so switching is instant
 hammer_frame_index = 0  # which frame is showing (0 = hammer at rest)
 hammer_animation_timer = None  # after() id of the current swing step
 
@@ -511,15 +509,6 @@ HAMMER_STRIKE_X_FRACTION = 0.39
 # vertical position of the hammer head inside Hammer.png (0 = top, 1 = bottom)
 HAMMER_STRIKE_Y_FRACTION = 0.28
 
-# Converts a pixel position in the canvas to metres by simple proportion (ignores the cabinet image
-# and its perspective). Only used by get_hole_grid_cell; gameplay positions use canvas_to_metres
-# instead.
-def pixel_to_metres (px,py):
-    width = max (container.winfo_width(), 1)
-    height = max(container.winfo_height(),1)
-    x_m = (px / width) * ROOM_WIDTH_M
-    y_m = (py / height) * ROOM_HEIGHT_M
-    return x_m, y_m
 # Which hole cell (row, col) a position in metres falls in: the play area is split evenly into
 # GRID_ROWS x GRID_COLS cells, and out-of-range values are clamped into the grid. Decides where the
 # red outline goes and keeps moles from spawning under the cursor.
@@ -529,16 +518,6 @@ def get_grid_cell(x_m, y_m):
     col = max (0, min (col, GRID_COLS - 1))
     row = max (0, min (row, GRID_ROWS - 1))
     return row, col
-# Same as get_grid_cell but starts from canvas pixels.
-def get_hole_grid_cell(px, py):
-    return get_grid_cell (*pixel_to_metres(px, py))
-
-# Centre of a Tk widget in pixels (leftover helper; not currently used).
-def widget_pixel_center(widget):
-    return (
-        widget.winfo_x() + widget.winfo_width() / 2,
-        widget.winfo_y() + widget.winfo_height() / 2
-    )
 
 # Returns the on-screen rectangle (x1, y1, x2, y2) of one hole. The centre comes from
 # metres_to_canvas; the size grows from the back row to the front row (perspective: nearer holes
@@ -912,9 +891,16 @@ def draw_hammer_sprite():
         target_height
     )
 
-    # Rebuild the cached hammer frames only when
-    # the displayed hammer size changes.
+    # Frames are built once per (hammer, size) and kept, so switching to and from the Golden
+    # Hammer reuses them instead of rebuilding.
+    if hammer_image_size != hammer_cache_key and hammer_cache_key in hammer_frames_cache:
+        hammer_frame_photos = hammer_frames_cache[hammer_cache_key]
+        hammer_image_size = hammer_cache_key
+
     if hammer_image_size != hammer_cache_key:
+        if len(hammer_frames_cache) > 8:   # the window was resized a lot: drop old sizes
+            hammer_frames_cache.clear()
+
         resized_image = active_hammer_source.resize(
             target_size,
             Image.Resampling.LANCZOS
@@ -939,6 +925,7 @@ def draw_hammer_sprite():
             )
 
         hammer_image_size = hammer_cache_key
+        hammer_frames_cache[hammer_cache_key] = hammer_frame_photos
 
     if not hammer_frame_photos:
         return
@@ -1520,6 +1507,7 @@ def serial_thread():
     connecting = set()
 
     while True:
+        polled_any = False
         for box_id in BOX_IDS:
             if box_links[box_id] is None:
                 if box_id not in connecting and time.monotonic() >= retry_after[box_id]:
@@ -1528,6 +1516,7 @@ def serial_thread():
                                      daemon=True).start()
                 continue
 
+            polled_any = True
             try:
                 ser = box_links[box_id]
                 ser.reset_input_buffer()
@@ -1555,7 +1544,10 @@ def serial_thread():
             with distance_lock:
                 latest_by_box[box_id] = reading
 
-        time.sleep(0.01)   # nothing answered: don't spin the CPU
+        # No box connected: don't spin the CPU. (Polling a box already waits on its reply, so
+        # sleeping after a normal sweep would only add lag to every reading.)
+        if not polled_any:
+            time.sleep(0.01)
 
 
 # Converts a sensor distance (mm) to a depth in metres in the play area: 0 at sensor_near_mm up to
@@ -1727,9 +1719,11 @@ def update_pause(player_seen):
     """Called every frame with True if any box sees someone."""
     global player_missing_since
 
-    sensors_connected = any(link is not None for link in box_links.values())
+    # Only pause when every box is connected. With one missing, a player standing in that box's
+    # column can't be seen, and the game would keep pausing while they play.
+    all_boxes_connected = bool(box_links) and all(link is not None for link in box_links.values())
 
-    if not game_running or not sensors_connected or player_seen:
+    if not game_running or not all_boxes_connected or player_seen:
         player_missing_since = None
         if game_paused:
             set_paused(False)
@@ -1771,9 +1765,15 @@ def update_golden_hammer():
 # a hole and smooth it, (5) move the hammer and check for a hit. The cursor is only moved while a
 # round is running.
 def poll_sensor():
+    # Schedule the next frame first, so an error in this one can't stop the loop for good.
+    root.after(FRAME_MS, poll_sensor)
+    poll_sensor_frame()
+
+
+def poll_sensor_frame():
     global cursor_x_m, cursor_y_m, active_box_id, last_frame_at
 
-# Keep the Golden Hammer timer updated even while using sensors.
+    # Keep the Golden Hammer timer updated even while using sensors.
     if game_running:
         update_golden_hammer()
 
@@ -1810,8 +1810,6 @@ def poll_sensor():
         update_cursor_indicator()
         draw_hammer_sprite()
         check_whack()
-
-    root.after(FRAME_MS, poll_sensor)
 
 # -------------------------
 # Menu state helpers
@@ -2053,6 +2051,18 @@ def build_mole_info():
 # -------------------------
 # Runs once at startup now: the canvas, sprites and menus all persist.
 
+# The sprite PNGs are about 1250 px square but are never drawn more than a few hundred pixels wide.
+# Shrinking them once at load keeps every later resize fast (about 18 ms each at full size, which
+# drops a frame) and cuts their memory use by about 90%.
+SPRITE_MAX_PX = 600
+
+
+def load_sprite(path):
+    image = Image.open(path).convert("RGBA")
+    image.thumbnail((SPRITE_MAX_PX, SPRITE_MAX_PX), Image.Resampling.LANCZOS)
+    return image
+
+
 def create_game():
 
     global container
@@ -2154,57 +2164,19 @@ def create_game():
     # Each entry contains its normal/up sprite and its hit sprite.
     mole_image_sources.clear()
 
-    mole_image_sources.update({
-        "normal": {
-            "idle": Image.open(
-                "Assets/Idle mole.png"
-            ).convert("RGBA"),
-
-            "hit": Image.open(
-                "Assets/Mole Hit.png"
-            ).convert("RGBA")
-        },
-
-        "golden": {
-            "idle": Image.open(
-                "Assets/Golden Mole.png"
-            ).convert("RGBA"),
-
-            "hit": Image.open(
-                "Assets/Golden Mole Hit.png"
-            ).convert("RGBA")
-        },
-
-        "time": {
-            "idle": Image.open(
-                "Assets/Time Mole.png"
-            ).convert("RGBA"),
-
-            "hit": Image.open(
-                "Assets/Time Mole Hit.png"
-            ).convert("RGBA")
-        },
-
-        "combo": {
-            "idle": Image.open(
-                "Assets/Combo Mole.png"
-            ).convert("RGBA"),
-
-            "hit": Image.open(
-                "Assets/Combo Mole Hit.png"
-            ).convert("RGBA")
-        },
-
-        "ta": {
-            "idle": Image.open(
-                "Assets/TA Mole.png"
-            ).convert("RGBA"),
-
-            "hit": Image.open(
-                "Assets/TA Mole Hit.png"
-            ).convert("RGBA")
+    # (idle/up sprite, hit sprite) for each mole type
+    mole_files = {
+        "normal": ("Idle mole.png", "Mole Hit.png"),
+        "golden": ("Golden Mole.png", "Golden Mole Hit.png"),
+        "time": ("Time Mole.png", "Time Mole Hit.png"),
+        "combo": ("Combo Mole.png", "Combo Mole Hit.png"),
+        "ta": ("TA Mole.png", "TA Mole Hit.png"),
+    }
+    for mole_type, (idle_file, hit_file) in mole_files.items():
+        mole_image_sources[mole_type] = {
+            "idle": load_sprite("Assets/" + idle_file),
+            "hit": load_sprite("Assets/" + hit_file),
         }
-    })
 
     # Keep the normal mole on the home menu.
     menus.mole_source = mole_image_sources["normal"]["idle"]
@@ -2215,7 +2187,7 @@ def create_game():
     # Angry Iain, shown on the special game-over screen after hitting the TA mole. If the file is
     # missing the screen still works, just without the picture.
     try:
-        menus.ta_angry_image = Image.open("Assets/TA Angry.png").convert("RGBA")
+        menus.ta_angry_image = load_sprite("Assets/TA Angry.png")
     except FileNotFoundError:
         menus.ta_angry_image = None
 
@@ -2228,15 +2200,11 @@ def create_game():
         state="hidden"
     )
 
-    hammer_image_source = Image.open(
-        "Assets/Hammer.png"
-    ).convert("RGBA")
+    hammer_image_source = load_sprite("Assets/Hammer.png")
 
 
     # Golden version used during the Golden Mole power-up.
-    golden_hammer_image_source = Image.open(
-        "Assets/Golden Hammer.png"
-    ).convert("RGBA")
+    golden_hammer_image_source = load_sprite("Assets/Golden Hammer.png")
 
     hammer_image_photo = None
     hammer_image_size = None
@@ -2295,6 +2263,12 @@ def create_game():
 # the pointer to a position in the playfield (canvas_to_metres) and moves the cursor there. Outside
 # the playfield the pointer is ignored, unless MOUSE_CLAMP_TO_PLAYFIELD is True.
 def poll_mouse():
+    # Schedule the next check first, so an error in this one can't stop the loop for good.
+    root.after(5, poll_mouse)
+    poll_mouse_frame()
+
+
+def poll_mouse_frame():
     global cursor_x_m, cursor_y_m
 
     # Keep the Golden Hammer timer updated during mouse control.
@@ -2351,8 +2325,6 @@ def poll_mouse():
                 draw_hammer_sprite()
                 check_whack()
 
-    # Check mouse position again in 5 ms
-    root.after(5, poll_mouse)
 # -------------------------
 # Schedule Next Mole
 # -------------------------
@@ -2737,9 +2709,10 @@ def tick_round_timer():
         return
     round_timer_id = root.after(1000, tick_round_timer)
     
-# Stops the round: cancels every timer, clears the mole, then shows the game-over screen. Anything
-# that could still fire after the round must be cancelled here, or it would run on top of the menu.
-def end_round():
+# Stops the round: cancels every timer and clears the mole. Anything that could still fire after the
+# round must be cancelled here, or it would run on top of the menu. Used by end_round (time up,
+# Iain hit, F10) and return_to_menu (Esc).
+def stop_round():
     global game_running
     global mole
     global mole_timer
@@ -2780,6 +2753,10 @@ def end_round():
         mole_state = "hidden"
         mole_visible_fraction = 0.0
         draw_mole_sprite()
+
+# Ends the round normally and shows the game-over screen.
+def end_round():
+    stop_round()
 
     # Hitting Iain gets its own game-over screen (no score saved); anything else the normal one.
     if game_ended_by_ta:
@@ -2807,15 +2784,6 @@ def show_ta_game_over():
     play_game_over_then_menu_music(scream_left_ms)
     menus.show_ta_game_over(score)
 
-# Leftover helper that refreshes the debug read-out with the grid cell; it is not scheduled anywhere
-# at the moment.
-def update_coord_display():
-    if game_running:
-        grid_row, grid_col = get_hole_grid_cell(cursor_x_m, cursor_y_m)
-        coord_label.config(
-            text=f"x={cursor_x_m:.2f}m y={cursor_y_m:.2f}m (grid: {grid_row},{grid_col})"
-        )
-    root.after(50, update_coord_display)
 # -------------------------
 # Fullscreen Toggle
 # -------------------------
@@ -2827,54 +2795,9 @@ def toggle_fullscreen(event=None):
 # Return to Menu
 # -------------------------
 
-# Esc: abandons the current round (cancelling every timer, as end_round does) and shows the home
-# menu. No score is saved.
+# Esc: abandons the current round and shows the home menu. No score is saved.
 def return_to_menu(event=None):
-
-    global game_running
-    global mole
-    global mole_timer
-    global next_mole_timer
-    global round_timer_id
-    global mole_animation_timer
-    global mole_state
-    global mole_visible_fraction
-    global hammer_animation_timer
-    global hammer_frame_index
-
-    # Stop the game
-    game_running = False
-    audio.stop_music()
-    # Cancel existing timers
-    if mole_timer is not None:
-        root.after_cancel(mole_timer)
-        mole_timer = None
-
-    if round_timer_id is not None:
-        root.after_cancel(round_timer_id)
-        round_timer_id = None
-
-    if next_mole_timer is not None:
-        root.after_cancel(next_mole_timer)
-        next_mole_timer = None
-
-    if mole_animation_timer is not None:
-        root.after_cancel(mole_animation_timer)
-        mole_animation_timer = None
-
-    if hammer_animation_timer is not None:
-        root.after_cancel(hammer_animation_timer)
-        hammer_animation_timer = None
-
-    hammer_frame_index = 0
-
-    if mole is not None:
-        mole = None
-        mole_state = "hidden"
-        mole_visible_fraction = 0.0
-        draw_mole_sprite()
-
-    # Return to start menu
+    stop_round()
     start_menu()
 
 # -------------------------

@@ -219,6 +219,54 @@ class TestGameplay(unittest.TestCase):
         self.assertEqual(scheduled, [1500])
         self.assertAlmostEqual(scope["golden_hammer_ends_at"], 113.0)
 
+    def test_auto_pause_needs_every_box(self):
+        tree = ast.parse(GAME_FILE.read_text(encoding="utf-8-sig"))
+
+        functions = [
+            node for node in tree.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "update_pause"
+        ]
+
+        self.assertEqual(len(functions), 1)
+
+        # Input: box links, expected pause after 2 s with nobody seen
+        test_cases = [
+            ({1: "link", 2: "link", 3: "link"}, True),
+            ({1: "link", 2: None, 3: "link"}, False),   # a box is down
+            ({}, False)                                  # no pySerial: mouse only
+        ]
+
+        for links, expected in test_cases:
+            with self.subTest(links=links):
+                clock = {"now": 100.0}
+                pauses = []
+
+                scope = {
+                    "game_running": True,
+                    "game_paused": False,
+                    "player_missing_since": None,
+                    "player_gone": 1.0,
+                    "box_links": links,
+                    "time": SimpleNamespace(monotonic=lambda: clock["now"]),
+                    "set_paused": pauses.append
+                }
+
+                exec(
+                    compile(
+                        ast.Module(body=functions, type_ignores=[]),
+                        str(GAME_FILE),
+                        "exec"
+                    ),
+                    scope
+                )
+
+                scope["update_pause"](False)
+                clock["now"] = 102.0
+                scope["update_pause"](False)
+
+                self.assertEqual(pauses == [True], expected)
+
 
 if __name__ == "__main__":
     unittest.main()
