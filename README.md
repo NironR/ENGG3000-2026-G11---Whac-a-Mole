@@ -59,7 +59,7 @@ py -m unittest discover -s tests -v
 The same tests run on GitHub for every pull request.
 
 ## Hardware setup
-1. **Flash each box.** Open `sensor.ino` in the Arduino IDE with the ESP32 board package (Espressif) installed. Set `#define BOX_ID` to the box's number (1, 2 or 3), then upload. Each box has two RCWL-1601 sensors: sensor 1 on Trig 18 / Echo 23, sensor 2 on Trig 21 / Echo 19.
+1. **Flash each box.** Open `firmware/sensor/sensor.ino` in the Arduino IDE with the ESP32 board package (Espressif) installed. Set `#define BOX_ID` to the box's number (1, 2 or 3), then upload. Each box has two RCWL-1601 sensors: sensor 1 on Trig 18 / Echo 23, sensor 2 on Trig 21 / Echo 19.
 2. **Pair each box** with the PC in Windows Bluetooth settings. Boxes advertise as `ENGG3000_<BOX_ID>`.
 3. **Map the boxes.** `boxes.py` matches each box to its COM port by Bluetooth address, re-pairing it.
 4. **Place the boxes** along the screen wall, one per column. With `MIRROR_BOXES = True` in `whacka.py`, box 1 drives the right-hand column on screen and box 3 the left. If the boxes sit out from the wall, set `BOX_WALL_OFFSET_MM` to that distance.
@@ -82,7 +82,17 @@ This pings every box 10 times and reports round-trip latency. Pass a port (e.g. 
 Stepping within 60 cm of the screen sounds an alarm.
 
 ## How it works
-- `sensor.ino`: ESP32 firmware. Each box has two RCWL-1601 ultrasonic
+```
+whacka.py, menus.py, audio.py   the game
+boxes.py, bt_test.py, sensor_view.py   sensor box connection and bench tools
+Assets/      game sprites and audio
+firmware/    ESP32 sensor box firmware
+hardware/    bill of materials, enclosure CAD, calibration data
+docs/        plans and diagrams
+tests/       automated tests
+```
+
+- `firmware/sensor/sensor.ino`: ESP32 firmware. Each box has two RCWL-1601 ultrasonic
   sensors, polled on request over Bluetooth SPP (`ENGG3000_<BOX_ID>`).
   The PC asks one box at a time, so only one sensor is ever listening.
 - `whacka.py`: the game. Polls each paired box in turn, picks the
@@ -95,11 +105,12 @@ Stepping within 60 cm of the screen sounds an alarm.
 - `bt_test.py`: bench tool for checking boxes over Bluetooth without
   launching the game.
 - `sensor_view.py`: live visualiser of raw box readings, for calibration.
-- `BOM.md` — bill of materials and costs.
+- `hardware/BOM.md`: bill of materials and costs.
+- `hardware/enclosure/`: sensor box enclosure. `sensor_box.py` generates the body and lid STLs.
 
-![Architectural Design](Assets/whack-a-mole-runtime.png)
+![Architectural Design](docs/diagrams/runtime-architecture.png)
 
-![Game Flow](Assets/Whack_a_Mole_GameFlow.png)
+![Game Flow](docs/diagrams/game-flow.png)
 
 ## Troubleshooting
 - **Game prints "pySerial not available" and only the mouse works.** Either `pyserial` isn't installed or `boxes.py` is missing. Both cause the same message.
