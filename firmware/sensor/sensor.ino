@@ -64,8 +64,12 @@ void loop() {
   readBothDistancesMm(d1, d2);
   long combined = combineReadings(d1, d2);  // -1 = looked, saw nothing
 
-  SerialBT.println(String(BOX_ID) + " DIST " + String(combined));
-  Serial.println(String(BOX_ID) + " DIST " + String(combined) + "  (d1=" + String(d1) + " d2=" + String(d2) + ")");
+  // Built in a fixed buffer and sent as ONE Bluetooth write: println() of a String allocates on the
+  // heap and can send the text and the line ending as two separate packets, adding lag.
+  char reply[24];
+  int len = snprintf(reply, sizeof(reply), "%d DIST %ld\r\n", BOX_ID, combined);
+  SerialBT.write((const uint8_t *)reply, len);
+  Serial.printf("%d DIST %ld  (d1=%ld d2=%ld)\r\n", BOX_ID, combined, d1, d2);
 }
 
 long combineReadings(long d1, long d2) {

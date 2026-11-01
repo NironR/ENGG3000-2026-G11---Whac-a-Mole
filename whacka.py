@@ -77,7 +77,7 @@ except ImportError:
 # still runs, controlled by the mouse.
 try:
     import serial
-    from boxes import BOX_IDS, find_port, open_port
+    from boxes import BOX_IDS, answers_as, find_port, open_port
     serial_available = True     
 except ImportError:
     serial_available = False
@@ -1381,10 +1381,10 @@ def read_reading(ser, box_id):
         line = ser.readline()
         if not line:
             return None
-        parts = line.decode("utf-8", errors="ignore").split()
-        if len(parts) >= 3 and parts[0] == str(box_id) and parts[1] == "DIST":
+        line = line.decode("utf-8", errors="ignore")
+        if answers_as(line, box_id):
             try:
-                return int(parts[2])
+                return int(line.split()[2])
             except ValueError:
                 return None
     return None
@@ -2653,7 +2653,7 @@ def check_whack():
     if golden_hammer_active:
         audio.play_effect("golden")
     else:
-        audio.play_whack()
+        audio.play_effect("whack")
 
     # Show the correct hit sprite for this mole type.
     mole_state = "hit"
