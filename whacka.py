@@ -425,6 +425,11 @@ mole_image_id = None
 # The normal mole remains the default.
 current_mole_type = "normal"
 
+# Power-up state; start_game() resets these for every round.
+golden_hammer_active = False
+golden_hammer_ends_at = 0.0  # time.monotonic() when the Golden Hammer runs out
+combo_shield_active = False
+
 # -------------------------
 # Mole Types
 # -------------------------
@@ -1676,11 +1681,32 @@ game_paused = False
 player_missing_since = None
 pause_label = None
 player_gone = 1.0   # seconds with nobody detected before pausing
+paused_at = 0.0     # time.monotonic() when the current pause began
 
 
 def set_paused(paused):
-    global game_paused, pause_label
+    global game_paused, pause_label, paused_at
+    global mole_timer, mole_active_started_at, golden_hammer_ends_at
+
+    was_paused = game_paused
     game_paused = paused
+    now = time.monotonic()
+
+    if paused and not was_paused:
+        paused_at = now
+
+    # On resume, push every running clock forward by the time spent paused, so a pause never eats
+    # into the mole's up-time (which would break the combo) or the Golden Hammer.
+    if was_paused and not paused:
+        if golden_hammer_active:
+            golden_hammer_ends_at += now - paused_at
+
+        if mole is not None and mole_state == "active" and mole_timer is not None:
+            # Only the part of the pause after the mole came fully up counts against it.
+            mole_active_started_at += now - max(paused_at, mole_active_started_at)
+            remaining_ms = mole_active_duration_ms - (now - mole_active_started_at) * 1000
+            root.after_cancel(mole_timer)
+            mole_timer = root.after(max(0, int(remaining_ms)), hide_mole)
 
     if paused:
         if pause_label is None or not pause_label.winfo_exists():
@@ -1725,7 +1751,8 @@ def update_golden_hammer():
     global golden_hammer_active
     global hammer_image_size
 
-    if not golden_hammer_active:
+    # Paused time doesn't count; set_paused() moves the end time on when play resumes.
+    if not golden_hammer_active or game_paused:
         return
 
     if time.monotonic() >= golden_hammer_ends_at:
@@ -2051,7 +2078,6 @@ def create_game():
     global hammer_frame_photos
     global hammer_frame_index
     global hammer_animation_timer
-    global mole_image_sources
 
     # These two labels are never displayed (they are never packed) but other functions still update
     # them. They are kept so that code keeps working.
@@ -2414,7 +2440,6 @@ def hide_mole():
 
     global mole_timer
     global combo
-    global mole_active_started_at
     global combo_shield_active
 
     if mole is None:
@@ -2422,8 +2447,8 @@ def hide_mole():
 
     if mole_state != "active":
         return
+    # Keep the mole up while paused; set_paused() reschedules this with the up-time that was left.
     if game_paused:
-        mole_active_started_at += 0.1
         mole_timer = root.after(100, hide_mole)
         return
 
