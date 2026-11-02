@@ -347,6 +347,32 @@ class TestGameplay(unittest.TestCase):
                     # Lasts GOLDEN_HAMMER_DURATION_S from the hit
                     self.assertEqual(scope["golden_hammer_ends_at"], 105.0)
 
+    def test_mouse_on_mole_picture(self):
+        # The mole is in the front hole; its picture also covers part of the back hole's outline
+        front = {"row": 1, "col": 0, "x_m": 0.25, "y_m": 1.05}
+        back = {"row": 0, "col": 0, "x_m": 0.25, "y_m": 0.35}
+        bounds = {id(front): (0, 100, 50, 150), id(back): (0, 0, 50, 50)}
+        scope = load_functions({"pointer_to_metres"}, {
+            "mole": front,
+            "holes": [back, front],
+            "mole_image_id": "mole sprite",
+            "MOUSE_CLAMP_TO_PLAYFIELD": False,
+            "canvas_to_metres": lambda px, py, clamp: ("playfield", px, py),
+            "get_hole_bounds": lambda hole, scale: bounds[id(hole)],
+            "container": SimpleNamespace(
+                # the mole picture spans y 20..150 on the canvas
+                find_overlapping=lambda x1, y1, x2, y2: ["mole sprite"] if 20 <= y1 <= 150 else []
+            )
+        })
+        to_metres = scope["pointer_to_metres"]
+
+        # On the mole's picture, outside any other hole: counts as the mole's hole
+        self.assertEqual(to_metres(25, 80), (0.25, 1.05))
+        # On the picture but inside the back hole's outline: stays the back hole
+        self.assertEqual(to_metres(25, 30), ("playfield", 25, 30))
+        # Off the picture: wherever the pointer really is
+        self.assertEqual(to_metres(25, 10), ("playfield", 25, 10))
+
     def test_missed_moles(self):
         # Input: mole type, shield up, expected (combo, shield) after the mole hides unhit
         test_cases = [
