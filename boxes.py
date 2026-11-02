@@ -7,7 +7,7 @@ from serial.tools import list_ports
 # pinned by Bluetooth address instead
 BOX_BT_ADDRS = {   # BOX_ID -> Bluetooth address
     1: "383E516EB8AE",
-    2: "20E7C86A8D0A",   # replacement ESP32, fitted 2026-11-02
+    2: "E465B85C762E",
     3: "68094725D102",
 }
 BOX_IDS = tuple(BOX_BT_ADDRS)
