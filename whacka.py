@@ -1937,8 +1937,8 @@ def start_game(difficulty):
     game_ended_by_ta = False
 
     # Cancel any menu audio still waiting to start and cut off the end-of-game sounds. The menu
-    # music itself keeps playing through the gates and the countdown, and is replaced by the game
-    # music when the round begins.
+    # music keeps playing while the gates close and stops when they shut (covered below); the
+    # countdown is silent and the game music starts with the round.
     menu_audio_token += 1
     audio.stop_effect("gameover")
     audio.stop_effect("iain")
@@ -1946,7 +1946,9 @@ def start_game(difficulty):
     refresh_high_score()
 
     def covered():
-        # The gates have shut over the menu: swap it for the playfield behind them
+        # The gates have shut over the menu: stop the menu music (the clang plays over the
+        # silence) and swap the menu for the playfield behind them
+        audio.stop_music()
         menus.hide()
         redraw_playfield()
 
