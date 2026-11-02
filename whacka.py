@@ -449,21 +449,22 @@ MOLE_SPAWN_CHANCES = {
     },
 
     "Medium": {
-        "normal": 0.825,
+        "normal": 0.84,
         "golden": 0.05,
         "time": 0.05,
         "combo": 0.04,
-        "ta": 0.035
+        "ta": 0.02
     },
 
     "Hard": {
-        "normal": 0.775,
+        "normal": 0.80,
         "golden": 0.06,
         "time": 0.05,
         "combo": 0.05,
-        "ta": 0.065
+        "ta": 0.04
     }
 }
+assert all(abs(sum(chances.values()) - 1.0) < 1e-9 for chances in MOLE_SPAWN_CHANCES.values())
 
 # Resized mole frames, keyed by (mole type, is_hit, width, height), so the sprite isn't re-resized
 # every animation step
