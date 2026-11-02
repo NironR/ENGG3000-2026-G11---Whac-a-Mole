@@ -47,6 +47,7 @@
 #   otherwise a stale timer fires on top of the menu.
 import math  # pi, used by the cursor smoothing filter
 import os  # builds the path of leaderboard.json
+import sys  # tells whether we are running as the packaged .exe
 import tempfile
 import threading  # background sensor loop and beeps, keeps the window responsive
 import tkinter as tk  # the GUI toolkit: window, canvas, labels
@@ -54,6 +55,13 @@ import random  # chooses which hole and how long a mole stays up
 import statistics  # linear regression, used by trilaterate()
 import time  # monotonic clock: reaction timing and sensor frame time
 import json  # reads and writes leaderboard.json
+
+# Where the game's files live. Run as a script, both are this folder. In the packaged .exe
+# (PyInstaller), Assets is unpacked into a temporary folder (sys._MEIPASS) that is deleted on exit,
+# so the leaderboard is kept next to the .exe instead, or every score would be lost.
+CODE_DIR = os.path.dirname(os.path.abspath(__file__))
+ASSET_DIR = os.path.join(getattr(sys, "_MEIPASS", CODE_DIR), "Assets")
+DATA_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else CODE_DIR
 import audio
 audio.init()
 from PIL import Image, ImageTk  # Pillow: load, resize and rotate sprites; convert them for Tk
@@ -138,10 +146,7 @@ GOLDEN_HAMMER_DURATION_S = 5
 # -------------------------
 
 # Stored next to this script so the leaderboard is the same wherever the game is launched from
-LEADERBOARD_FILE = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    "leaderboard.json"
-)
+LEADERBOARD_FILE = os.path.join(DATA_DIR, "leaderboard.json")
 # How many scores are kept and shown on the leaderboard. The leaderboard screen has room for about 5
 # rows.
 MAX_LEADERBOARD_ENTRIES = 5
@@ -2111,7 +2116,7 @@ def create_game():
     container.pack(fill=tk.BOTH, expand=True)
 
     # Blurred copy of the cabinet art drawn behind it to fill any empty window space.
-    backdrop = Backdrop("Assets/Arcade Machine.png")
+    backdrop = Backdrop(os.path.join(ASSET_DIR, "Arcade Machine.png"))
 
     # The menu system (menus.py). The game gives it callbacks rather than it importing the game: how
     # to start a game, read the scores and save a score.
@@ -2127,7 +2132,7 @@ def create_game():
     # Load the images ONCE here (not every round). File names are case-sensitive on some systems, so
     # match the Assets folder exactly.
     arcade_background_source = Image.open(
-        "Assets/Arcade Machine.png"
+        os.path.join(ASSET_DIR, "Arcade Machine.png")
     ).convert("RGBA")
 
     arcade_background_photo = None
@@ -2177,8 +2182,8 @@ def create_game():
     }
     for mole_type, (idle_file, hit_file) in mole_files.items():
         mole_image_sources[mole_type] = {
-            "idle": load_sprite("Assets/" + idle_file),
-            "hit": load_sprite("Assets/" + hit_file),
+            "idle": load_sprite(os.path.join(ASSET_DIR, idle_file)),
+            "hit": load_sprite(os.path.join(ASSET_DIR, hit_file)),
         }
 
     # Keep the normal mole on the home menu.
@@ -2190,7 +2195,7 @@ def create_game():
     # Angry Iain, shown on the special game-over screen after hitting the TA mole. If the file is
     # missing the screen still works, just without the picture.
     try:
-        menus.ta_angry_image = load_sprite("Assets/TA Angry.png")
+        menus.ta_angry_image = load_sprite(os.path.join(ASSET_DIR, "TA Angry.png"))
     except FileNotFoundError:
         menus.ta_angry_image = None
 
@@ -2203,11 +2208,11 @@ def create_game():
         state="hidden"
     )
 
-    hammer_image_source = load_sprite("Assets/Hammer.png")
+    hammer_image_source = load_sprite(os.path.join(ASSET_DIR, "Hammer.png"))
 
 
     # Golden version used during the Golden Mole power-up.
-    golden_hammer_image_source = load_sprite("Assets/Golden Hammer.png")
+    golden_hammer_image_source = load_sprite(os.path.join(ASSET_DIR, "Golden Hammer.png"))
 
     hammer_image_photo = None
     hammer_image_size = None
