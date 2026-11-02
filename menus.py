@@ -20,6 +20,8 @@ import time
 import tkinter as tk
 from PIL import Image, ImageTk, ImageFilter, ImageEnhance
 
+import audio  # hover tick, and enter / back blips on the buttons
+
 # Colours (hex RGB) used by every screen. Change these to re-theme the menus.
 AMBER = "#FFB81C"  # main accent: titles, borders, button outline and highlight
 ORANGE = "#FF8A1F"  # secondary accent: small headings
@@ -316,11 +318,12 @@ class MenuManager:
         if self.visible and not self.transitioning and self.buttons:
             self.selected = (self.selected + step) % len(self.buttons)
             self._paint_buttons()
+            audio.play_effect("hover")
 
     # Presses the highlighted button (same as clicking it).
     def activate(self):
         if self.visible and not self.transitioning and self.buttons:
-            self.buttons[self.selected]["action"]()
+            self._press(self.buttons[self.selected])
 
     # ----- plumbing ---------------------------------------------------
 
@@ -365,7 +368,14 @@ class MenuManager:
         if i is not None and i != self.selected:
             self.selected = i
             self._paint_buttons()
+            audio.play_effect("hover")
         self.canvas.config(cursor="hand2" if i is not None else "")
+
+    # Plays the button sound, then runs its action. Buttons that go back to the home screen (BACK,
+    # MAIN MENU) get the higher "back" blip; every other button the lower "enter" blip.
+    def _press(self, button):
+        audio.play_effect("back" if button["action"] == self.show_home else "enter")
+        button["action"]()
 
     # Mouse clicked: run the action of the button under the pointer.
     def _on_click(self, event):
@@ -375,7 +385,7 @@ class MenuManager:
         i = self._hit(event.x, event.y)
         if i is not None:
             self.selected = i
-            self.buttons[i]["action"]()   # may start a transition or replace the screen; touch nothing after
+            self._press(self.buttons[i])   # may start a transition or replace the screen; touch nothing after
 
     # ----- transition gates ------------------------------------------
 
