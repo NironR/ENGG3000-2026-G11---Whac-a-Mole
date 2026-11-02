@@ -29,6 +29,8 @@ EFFECTS = {
     "hover":    {"file": "menu_hover.wav", "volume": 450, "voices": 2, "default_ms": 25},
     "enter":    {"file": "menu_enter.wav", "volume": 650, "voices": 2, "default_ms": 115},
     "back":     {"file": "menu_back.wav", "volume": 650, "voices": 2, "default_ms": 115},
+    # The metal gates slamming shut at the start of a game
+    "clang":    {"file": "gate_clang.wav", "volume": 750, "voices": 1, "default_ms": 380},
 }
 
 _available = sys.platform == "win32"
