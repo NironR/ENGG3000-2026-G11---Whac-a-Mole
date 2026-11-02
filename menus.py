@@ -20,6 +20,8 @@ import time
 import tkinter as tk
 from PIL import Image, ImageTk, ImageFilter, ImageEnhance
 
+import audio  # hover tick and press blip on the buttons
+
 # Colours (hex RGB) used by every screen. Change these to re-theme the menus.
 AMBER = "#FFB81C"  # main accent: titles, borders, button outline and highlight
 ORANGE = "#FF8A1F"  # secondary accent: small headings
@@ -316,10 +318,12 @@ class MenuManager:
         if self.visible and not self.transitioning and self.buttons:
             self.selected = (self.selected + step) % len(self.buttons)
             self._paint_buttons()
+            audio.play_effect("hover")
 
     # Presses the highlighted button (same as clicking it).
     def activate(self):
         if self.visible and not self.transitioning and self.buttons:
+            audio.play_effect("press")
             self.buttons[self.selected]["action"]()
 
     # ----- plumbing ---------------------------------------------------
@@ -365,6 +369,7 @@ class MenuManager:
         if i is not None and i != self.selected:
             self.selected = i
             self._paint_buttons()
+            audio.play_effect("hover")
         self.canvas.config(cursor="hand2" if i is not None else "")
 
     # Mouse clicked: run the action of the button under the pointer.
@@ -375,6 +380,7 @@ class MenuManager:
         i = self._hit(event.x, event.y)
         if i is not None:
             self.selected = i
+            audio.play_effect("press")
             self.buttons[i]["action"]()   # may start a transition or replace the screen; touch nothing after
 
     # ----- transition gates ------------------------------------------
