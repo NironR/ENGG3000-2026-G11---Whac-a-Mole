@@ -445,7 +445,7 @@ MOLE_SPAWN_CHANCES = {
         "golden": 0.04,
         "time": 0.04,
         "combo": 0.02,
-        "ta": 1
+        "ta": 0.0
     },
 
     "Medium": {
