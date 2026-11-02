@@ -58,6 +58,18 @@ py -m unittest discover -s tests -v
 
 The same tests run on GitHub for every pull request.
 
+6. (Optional: Build the Windows `.exe`)
+
+```bash
+py -m pip install pyinstaller
+```
+
+```bash
+py -m PyInstaller --noconfirm --onefile --windowed --name Whack-a-Mole --add-data "Assets;Assets" whacka.py
+```
+
+This creates `dist/Whack-a-Mole.exe`, a single file that runs without Python installed. Copy it anywhere; the leaderboard (`leaderboard.json`) is saved next to it. Box Bluetooth addresses come from `boxes.py`, so rebuild after changing them.
+
 ## Hardware setup
 1. **Flash each box.** Open `firmware/sensor/sensor.ino` in the Arduino IDE with the ESP32 board package (Espressif) installed. Set `#define BOX_ID` to the box's number (1, 2 or 3), then upload. Each box has two RCWL-1601 sensors: sensor 1 on Trig 18 / Echo 23, sensor 2 on Trig 21 / Echo 19.
 2. **Pair each box** with the PC in Windows Bluetooth settings. Boxes advertise as `ENGG3000_<BOX_ID>`.
@@ -132,6 +144,7 @@ for the use of ninja cyborg used for our background audio.
 - Redesigned fullscreen menus.
 - `F10` debug key to force game over.
 - Automated tests for the leaderboard, difficulty and scoring, run on every pull request.
+- Packaged Windows `.exe` build (PyInstaller, one file).
 
 #### Changed
 - Sensor 1 Echo moved from GPIO5 (a boot strapping pin) to GPIO23. Rewire each box to match.
@@ -139,7 +152,6 @@ for the use of ninja cyborg used for our background audio.
 - The leaderboard ignores corrupt entries and saves via a temp file, so a failed save can't wipe it.
 
 #### Planned
-- Packaged `.exe` build of the game.
 - One 4xAA NiMH pack per sensor box, to stop brownout resets when Bluetooth starts.
 - Firmware: reduce latency and noise.
 - Buffs and debuffs, e.g. a mirrored-controls mole and a hammer-breaking mole that ends the game.

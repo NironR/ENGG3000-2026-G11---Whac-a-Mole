@@ -2,7 +2,9 @@ import ctypes
 import os
 import sys
 
-AUDIO_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Assets", "Audio")
+# Inside the packaged .exe the assets are unpacked to sys._MEIPASS
+AUDIO_DIR = os.path.join(getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__))),
+                         "Assets", "Audio")
 
 # Looping background tracks, one per difficulty plus "Menu" (used on every menu screen). Only one
 # plays at a time: starting another track, or stop_music(), stops the current one.
