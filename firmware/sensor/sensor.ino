@@ -16,7 +16,9 @@ int echoPin2 = 19;
 int trigPin2 = 21;
 #endif
 
-const unsigned long ECHO_TIMEOUT_US = 15000;
+// ~2.14 m: just past the game's furthest used distance (sensor_far_mm, 2.0 m in whacka.py), so a
+// sensor that sees nothing gives up sooner. Raise it if the play area gets deeper.
+const unsigned long ECHO_TIMEOUT_US = 12500;
 const unsigned long ECHO_START_US = 2000;
 const long MIN_MM = 30;         // RCWL-1601 blind zone: anything nearer is junk
 const long MERGE_GAP_MM = 150;  // readings further apart than this saw different things

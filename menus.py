@@ -18,14 +18,15 @@ No dependency on the game file: the game passes callbacks in.
 """
 import time
 import tkinter as tk
-from PIL import Image, ImageTk, ImageFilter, ImageEnhance
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageOps, ImageTk
+
+import audio  # hover tick, and enter / back blips on the buttons
 
 # Colours (hex RGB) used by every screen. Change these to re-theme the menus.
 AMBER = "#FFB81C"  # main accent: titles, borders, button outline and highlight
 ORANGE = "#FF8A1F"  # secondary accent: small headings
 RED = "#FF6A1A"  # GAME OVER title and error messages
 DARK = "#14110d"  # near-black: button fill, panels, gaps between stripes
-GATE = "#1a1610"  # colour of the transition gates
 PANEL_BG = "#1e1912"  # leaderboard row background
 CREAM = "#FFE9B8"  # normal text
 DIM = "#C9A55A"  # muted text (hints, high score)
@@ -35,9 +36,9 @@ NAME_LENGTH = 3  # characters accepted in the initials box
 
 # Gate transition timing, in milliseconds. Larger numbers = a slower, heavier transition. The whole
 # start-of-game delay is CLOSE + HOLD + OPEN.
-TRANSITION_CLOSE_MS = 380  # time for the gates to slide shut
-TRANSITION_HOLD_MS = 70  # pause while fully shut (the menu-to-game swap happens here)
-TRANSITION_OPEN_MS = 420  # time for the gates to slide open
+TRANSITION_CLOSE_MS = 600  # time for the gates to slide shut
+TRANSITION_HOLD_MS = 500  # pause while fully shut (the menu-to-game swap happens here)
+TRANSITION_OPEN_MS = 700  # time for the gates to slide open
 TRANSITION_FRAME_MS = 15  # delay between animation frames (15 ms is about 66 per second)
 
 # Edit freely; keep in sync with the game rules.
@@ -160,6 +161,7 @@ class MenuManager:
         self._bg_photo = None  # cached gradient background image
         self._bg_size = None  # the size that cached background was built for
         self._sprite_cache = {}  # resized mole pictures, keyed by (picture id, width, height)
+        self._steel_cache = {}  # the two steel door pictures for the current window size
         self._tr_token = 0  # bumped to cancel a transition that is in progress
         self._gate_off = 0.0  # how far the gates have travelled so far (pixels)
         self._gate_dist = 0.0  # total distance each gate travels to meet in the middle
@@ -284,6 +286,7 @@ class MenuManager:
             if t < 1.0:
                 c.after(TRANSITION_FRAME_MS, lambda: run(phase, started))
             elif phase == "close":
+                audio.play_effect("clang")
                 on_covered()
                 c.tag_raise("gate")
                 c.after(TRANSITION_HOLD_MS, lambda: run("open", self.clock()))
@@ -316,11 +319,12 @@ class MenuManager:
         if self.visible and not self.transitioning and self.buttons:
             self.selected = (self.selected + step) % len(self.buttons)
             self._paint_buttons()
+            audio.play_effect("hover")
 
     # Presses the highlighted button (same as clicking it).
     def activate(self):
         if self.visible and not self.transitioning and self.buttons:
-            self.buttons[self.selected]["action"]()
+            self._press(self.buttons[self.selected])
 
     # ----- plumbing ---------------------------------------------------
 
@@ -365,7 +369,14 @@ class MenuManager:
         if i is not None and i != self.selected:
             self.selected = i
             self._paint_buttons()
+            audio.play_effect("hover")
         self.canvas.config(cursor="hand2" if i is not None else "")
+
+    # Plays the button sound, then runs its action. Buttons that go back to the home screen (BACK,
+    # MAIN MENU) get the higher "back" blip; every other button the lower "enter" blip.
+    def _press(self, button):
+        audio.play_effect("back" if button["action"] == self.show_home else "enter")
+        button["action"]()
 
     # Mouse clicked: run the action of the button under the pointer.
     def _on_click(self, event):
@@ -375,12 +386,12 @@ class MenuManager:
         i = self._hit(event.x, event.y)
         if i is not None:
             self.selected = i
-            self.buttons[i]["action"]()   # may start a transition or replace the screen; touch nothing after
+            self._press(self.buttons[i])   # may start a transition or replace the screen; touch nothing after
 
     # ----- transition gates ------------------------------------------
 
-    # Creates the two gate doors just off-screen (left and right). Each door is a dark panel with a
-    # hazard-striped edge that faces the middle. Everything is tagged "gate" (plus "gateL" or
+    # Creates the two gate doors just off-screen (left and right). Each door is a brushed-steel sheet
+    # with a hazard-striped edge that faces the middle. Everything is tagged "gate" (plus "gateL" or
     # "gateR") so it can be moved or deleted as a group.
     def _build_gates(self, w, h):
         c = self.canvas
@@ -388,19 +399,45 @@ class MenuManager:
         self._gate_dist = w / 2 + 1       # how far each door travels to meet in the middle
         self._gate_off = 0.0
         band = max(14, h * 0.07)
-        for side, x0 in (("L", -door), ("R", w)):      # both start off-screen
+        steel = self._steel_doors(int(door) + 1, int(h) + 1, int(band))
+        for side, x0, photo in (("L", -door, steel[0]), ("R", w, steel[1])):   # both start off-screen
             tags = ("gate", "gate" + side)
             x1 = x0 + door
-            c.create_rectangle(x0, 0, x1, h, fill=GATE, outline="", tags=tags)
-            for frac in (1 / 3, 2 / 3):
-                c.create_rectangle(x0, h * frac - 1, x1, h * frac + 1,
-                                   fill="#2a2218", outline="", tags=tags)
+            c.create_image(x0, 0, anchor="nw", image=photo, tags=tags)
             bx0, bx1 = (x1 - band, x1) if side == "L" else (x0, x0 + band)
             c.create_rectangle(bx0, 0, bx1, h, fill=DARK, outline="", tags=tags)
             self._vstripes(bx0, bx1, h, tags)
             edge = x1 if side == "L" else x0
             c.create_rectangle(edge - 3, 0, edge + 3, h, fill=AMBER, outline="", tags=tags)
         c.tag_raise("gate")
+
+    # The steel faces of the two doors as Tk images, (left, right), built once per window size: a
+    # light-to-dark gradient with fine horizontal brushing, two plate seams and rows of rivets. The
+    # right door is a mirror image so the pattern matches across the middle; no rivets go under the
+    # hazard band (`band` pixels wide) on the inner edge.
+    def _steel_doors(self, dw, dh, band):
+        key = (dw, dh)
+        if key not in self._steel_cache:
+            shade = Image.linear_gradient("L").resize((dw, dh)).point(lambda v: int(205 - v * 0.35))
+            brush = Image.effect_noise((max(2, dw // 80), dh), 24).resize((dw, dh), Image.Resampling.BILINEAR)
+            steel = Image.blend(shade, brush, 0.25)
+            d = ImageDraw.Draw(steel)
+            r = max(3, dh // 110)                     # rivet radius
+            seams = (dh / 3, 2 * dh / 3)
+            for y in seams:                           # a dark groove with a light lip under it
+                d.line([(0, y - 1), (dw, y - 1)], fill=40, width=max(2, r // 2))
+                d.line([(0, y + r // 2), (dw, y + r // 2)], fill=190, width=1)
+            margin = r * 4
+            rows = [margin, dh - margin] + [y + margin * s for y in seams for s in (-1, 1)]
+            step = max(r * 10, dw // 10)
+            for y in rows:
+                for x in range(margin, dw - band - margin + 1, step):
+                    d.ellipse([x - r, y - r, x + r, y + r], fill=70)                # shadow
+                    d.ellipse([x - r + 1, y - r + 1, x + r - 2, y + r - 2], fill=175)  # head
+                    d.ellipse([x - r // 2, y - r // 2, x, y], fill=230)              # highlight
+            rgb = ImageOps.colorize(steel, black="#1d2125", white="#d6dbe0")
+            self._steel_cache = {key: (ImageTk.PhotoImage(rgb), ImageTk.PhotoImage(ImageOps.mirror(rgb)))}
+        return self._steel_cache[key]
 
     # Positions the gates for progress 0.0 (fully open, off-screen) to 1.0 (fully shut, meeting in
     # the middle) by moving them the difference since last time.
