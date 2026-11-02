@@ -7,8 +7,14 @@ BluetoothSerial SerialBT;
 //Ultrasonic sensor pins
 int echoPin1 = 23;
 int trigPin1 = 18;
+#if BOX_ID == 2
+// Box 2's sensor 2 is wired to 25/26 instead of 21/19 (its first ESP32's 21/19 didn't work).
+int echoPin2 = 26;
+int trigPin2 = 25;
+#else
 int echoPin2 = 19;
 int trigPin2 = 21;
+#endif
 
 const unsigned long ECHO_TIMEOUT_US = 15000;
 const unsigned long ECHO_START_US = 2000;
@@ -64,8 +70,12 @@ void loop() {
   readBothDistancesMm(d1, d2);
   long combined = combineReadings(d1, d2);  // -1 = looked, saw nothing
 
-  SerialBT.println(String(BOX_ID) + " DIST " + String(combined));
-  Serial.println(String(BOX_ID) + " DIST " + String(combined) + "  (d1=" + String(d1) + " d2=" + String(d2) + ")");
+  // Built in a fixed buffer and sent as ONE Bluetooth write: println() of a String allocates on the
+  // heap and can send the text and the line ending as two separate packets, adding lag.
+  char reply[24];
+  int len = snprintf(reply, sizeof(reply), "%d DIST %ld\r\n", BOX_ID, combined);
+  SerialBT.write((const uint8_t *)reply, len);
+  Serial.printf("%d DIST %ld  (d1=%ld d2=%ld)\r\n", BOX_ID, combined, d1, d2);
 }
 
 long combineReadings(long d1, long d2) {

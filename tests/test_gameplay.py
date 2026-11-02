@@ -6,6 +6,54 @@ from types import SimpleNamespace
 GAME_FILE = Path(__file__).resolve().parents[1] / "whacka.py"
 
 
+# Runs the named whacka.py functions inside `scope` (without starting the GUI) and returns it.
+def load_functions(names, scope):
+    tree = ast.parse(GAME_FILE.read_text(encoding="utf-8-sig"))
+    functions = [
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name in names
+    ]
+    assert len(functions) == len(names), "a function was renamed or removed"
+    exec(compile(ast.Module(body=functions, type_ignores=[]), str(GAME_FILE), "exec"), scope)
+    return scope
+
+
+# Game state for one active mole 0.1 s into a 2 s up-time (a 100-point hit), with the GUI and
+# audio replaced by harmless stand-ins. `scheduled` collects what root.after() was asked to run.
+def special_mole_scope(mole_type, scheduled, **overrides):
+    scope = {
+        "score": 0, "combo": 0, "successful_hits": 0, "current_difficulty": "Easy",
+        "game_running": True, "game_paused": False, "game_ended_by_ta": False,
+        "current_mole_type": mole_type,
+        "golden_hammer_active": False, "golden_hammer_ends_at": 0.0,
+        "combo_shield_active": False, "hammer_image_size": (1, 1),
+
+        "mole": {"x_m": 0.5, "y_m": 0.7}, "mole_state": "active",
+        "cursor_x_m": 0.5, "cursor_y_m": 0.7, "WHACK_RADIUS_M": 0.20,
+        "mole_active_duration_ms": 2000, "mole_active_started_at": 99.9,
+        "time": SimpleNamespace(monotonic=lambda: 100.0),
+
+        "time_remaining": 58, "ROUND_DURATION": 60,
+        "TIME_MOLE_BONUS": 5, "GOLDEN_HAMMER_DURATION_S": 5,
+        "mole_timer": None, "mole_animation_timer": None, "MOLE_HIT_DURATION_MS": 225,
+
+        "score_label": SimpleNamespace(config=lambda **kwargs: None),
+        "root": SimpleNamespace(after=lambda ms, func: scheduled.append(func) or "timer"),
+        "draw_hud": lambda: None,
+        "start_hammer_strike": lambda: None,
+        "draw_mole_sprite": lambda: None,
+        "start_mole_fall": "start_mole_fall",
+        "end_round": "end_round",
+        "audio": SimpleNamespace(
+            play_whack=lambda: None,
+            play_effect=lambda name: 0,
+            play_music=lambda name: None
+        )
+    }
+    scope.update(overrides)
+    return scope
+
+
 class TestGameplay(unittest.TestCase):
 
     def test_difficulty_thresholds(self):
@@ -218,6 +266,113 @@ class TestGameplay(unittest.TestCase):
         self.assertAlmostEqual(scope["mole_active_started_at"], 110.0)
         self.assertEqual(scheduled, [1500])
         self.assertAlmostEqual(scope["golden_hammer_ends_at"], 113.0)
+
+    def test_auto_pause_needs_every_box(self):
+        tree = ast.parse(GAME_FILE.read_text(encoding="utf-8-sig"))
+
+        functions = [
+            node for node in tree.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "update_pause"
+        ]
+
+        self.assertEqual(len(functions), 1)
+
+        # Input: box links, expected pause after 2 s with nobody seen
+        test_cases = [
+            ({1: "link", 2: "link", 3: "link"}, True),
+            ({1: "link", 2: None, 3: "link"}, False),   # a box is down
+            ({}, False)                                  # no pySerial: mouse only
+        ]
+
+        for links, expected in test_cases:
+            with self.subTest(links=links):
+                clock = {"now": 100.0}
+                pauses = []
+
+                scope = {
+                    "game_running": True,
+                    "game_paused": False,
+                    "player_missing_since": None,
+                    "player_gone": 1.0,
+                    "box_links": links,
+                    "time": SimpleNamespace(monotonic=lambda: clock["now"]),
+                    "set_paused": pauses.append
+                }
+
+                exec(
+                    compile(
+                        ast.Module(body=functions, type_ignores=[]),
+                        str(GAME_FILE),
+                        "exec"
+                    ),
+                    scope
+                )
+
+                scope["update_pause"](False)
+                clock["now"] = 102.0
+                scope["update_pause"](False)
+
+                self.assertEqual(pauses == [True], expected)
+
+    def test_special_mole_hits(self):
+        # Input: mole type, expected (score, combo, time left, golden hammer, shield, next step)
+        test_cases = [
+            ("normal", 100, 1, 58, False, False, "start_mole_fall"),
+            ("golden", 200, 1, 58, True, False, "start_mole_fall"),   # x2 from the hit itself
+            ("time", 100, 1, 60, False, False, "start_mole_fall"),    # 58 + 5 capped at 60
+            ("combo", 100, 2, 58, False, True, "start_mole_fall"),    # +2 combo and a shield
+            ("ta", 0, 0, 58, False, False, "end_round")               # no score, round ends
+        ]
+
+        for mole_type, points, combo, time_left, golden, shield, next_step in test_cases:
+            with self.subTest(mole_type=mole_type):
+                scheduled = []
+                scope = load_functions(
+                    {"check_whack", "get_hit_points", "update_difficulty"},
+                    special_mole_scope(mole_type, scheduled)
+                )
+
+                scope["check_whack"]()
+
+                self.assertEqual(scope["score"], points)
+                self.assertEqual(scope["combo"], combo)
+                self.assertEqual(scope["time_remaining"], time_left)
+                self.assertEqual(scope["golden_hammer_active"], golden)
+                self.assertEqual(scope["combo_shield_active"], shield)
+                self.assertEqual(scheduled, [next_step])
+                self.assertEqual(scope["game_running"], mole_type != "ta")
+                self.assertEqual(scope["game_ended_by_ta"], mole_type == "ta")
+                if golden:
+                    # Lasts GOLDEN_HAMMER_DURATION_S from the hit
+                    self.assertEqual(scope["golden_hammer_ends_at"], 105.0)
+
+    def test_missed_moles(self):
+        # Input: mole type, shield up, expected (combo, shield) after the mole hides unhit
+        test_cases = [
+            ("normal", False, 0, False),   # a miss resets the combo
+            ("normal", True, 4, False),    # the shield saves it once
+            ("ta", False, 4, False),       # letting Iain hide is not a miss
+            ("ta", True, 4, True)          # ...and doesn't use up the shield
+        ]
+
+        for mole_type, shield, combo, shield_after in test_cases:
+            with self.subTest(mole_type=mole_type, shield=shield):
+                scheduled = []
+                scope = load_functions(
+                    {"hide_mole", "update_difficulty"},
+                    special_mole_scope(
+                        mole_type, scheduled,
+                        combo=4, combo_shield_active=shield,
+                        start_mole_fall=lambda: scheduled.append("fall")
+                    )
+                )
+
+                scope["hide_mole"]()
+
+                self.assertEqual(scope["combo"], combo)
+                self.assertEqual(scope["combo_shield_active"], shield_after)
+                self.assertEqual(scheduled, ["fall"])
 
 
 if __name__ == "__main__":
