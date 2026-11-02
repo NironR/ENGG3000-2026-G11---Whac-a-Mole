@@ -2276,6 +2276,24 @@ def poll_mouse():
     poll_mouse_frame()
 
 
+# Where the mouse pointer (canvas pixels) is in the play area, in metres, or None off the playfield.
+# Pointing at the mole's picture counts as pointing at its hole, so aiming at a mole's head hits it
+# even though the head is drawn above the hole (for a back-row mole, above the playfield). Except
+# inside another hole's outline: a front-row mole's picture also covers part of the back-row hole
+# above it, and pointing at that hole must stay that hole, not hit the mole below.
+def pointer_to_metres(px, py):
+    position = canvas_to_metres(px, py, clamp=MOUSE_CLAMP_TO_PLAYFIELD)
+    if mole is not None and mole_image_id in container.find_overlapping(px, py, px, py):
+        over_another_hole = any(
+            h is not mole and x1 <= px <= x2 and y1 <= py <= y2
+            for h in holes
+            for x1, y1, x2, y2 in [get_hole_bounds(h, 1.0)]
+        )
+        if not over_another_hole:
+            return mole["x_m"], mole["y_m"]
+    return position
+
+
 def poll_mouse_frame():
     global cursor_x_m, cursor_y_m
 
@@ -2310,15 +2328,7 @@ def poll_mouse_frame():
         # the gameplay area
         if 0 <= px <= width and 0 <= py <= height:
 
-            physical_position = canvas_to_metres(
-                px,
-                py,
-                clamp=MOUSE_CLAMP_TO_PLAYFIELD
-            )
-
-            # No snapping to the mole sprite: a front-row sprite is drawn over the back-row hole
-            # above it, so pointing at the top hole used to hit the mole below (and a mole rising
-            # there was hit the moment it came up).
+            physical_position = pointer_to_metres(px, py)
 
             if physical_position is not None:
 
