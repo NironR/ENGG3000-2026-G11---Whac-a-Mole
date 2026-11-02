@@ -16,11 +16,14 @@ ultrasonic cursor can drive the menus later (e.g. dwell-to-select).
 
 No dependency on the game file: the game passes callbacks in.
 """
+import random
 import time
 import tkinter as tk
 from PIL import Image, ImageTk, ImageFilter, ImageEnhance
 
 import audio  # hover tick and press blip on the buttons
+
+PRESS_SOUNDS = ("press", "press2")  # one is picked at random for each button press
 
 # Colours (hex RGB) used by every screen. Change these to re-theme the menus.
 AMBER = "#FFB81C"  # main accent: titles, borders, button outline and highlight
@@ -323,7 +326,7 @@ class MenuManager:
     # Presses the highlighted button (same as clicking it).
     def activate(self):
         if self.visible and not self.transitioning and self.buttons:
-            audio.play_effect("press")
+            audio.play_effect(random.choice(PRESS_SOUNDS))
             self.buttons[self.selected]["action"]()
 
     # ----- plumbing ---------------------------------------------------
@@ -380,7 +383,7 @@ class MenuManager:
         i = self._hit(event.x, event.y)
         if i is not None:
             self.selected = i
-            audio.play_effect("press")
+            audio.play_effect(random.choice(PRESS_SOUNDS))
             self.buttons[i]["action"]()   # may start a transition or replace the screen; touch nothing after
 
     # ----- transition gates ------------------------------------------
