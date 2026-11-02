@@ -16,14 +16,11 @@ ultrasonic cursor can drive the menus later (e.g. dwell-to-select).
 
 No dependency on the game file: the game passes callbacks in.
 """
-import random
 import time
 import tkinter as tk
 from PIL import Image, ImageTk, ImageFilter, ImageEnhance
 
-import audio  # hover tick and press blip on the buttons
-
-PRESS_SOUNDS = ("press", "press2")  # one is picked at random for each button press
+import audio  # hover tick, and enter / back blips on the buttons
 
 # Colours (hex RGB) used by every screen. Change these to re-theme the menus.
 AMBER = "#FFB81C"  # main accent: titles, borders, button outline and highlight
@@ -326,8 +323,7 @@ class MenuManager:
     # Presses the highlighted button (same as clicking it).
     def activate(self):
         if self.visible and not self.transitioning and self.buttons:
-            audio.play_effect(random.choice(PRESS_SOUNDS))
-            self.buttons[self.selected]["action"]()
+            self._press(self.buttons[self.selected])
 
     # ----- plumbing ---------------------------------------------------
 
@@ -375,6 +371,12 @@ class MenuManager:
             audio.play_effect("hover")
         self.canvas.config(cursor="hand2" if i is not None else "")
 
+    # Plays the button sound, then runs its action. Buttons that go back to the home screen (BACK,
+    # MAIN MENU) get the higher "back" blip; every other button the lower "enter" blip.
+    def _press(self, button):
+        audio.play_effect("back" if button["action"] == self.show_home else "enter")
+        button["action"]()
+
     # Mouse clicked: run the action of the button under the pointer.
     def _on_click(self, event):
         if not self.visible or self.transitioning:
@@ -383,8 +385,7 @@ class MenuManager:
         i = self._hit(event.x, event.y)
         if i is not None:
             self.selected = i
-            audio.play_effect(random.choice(PRESS_SOUNDS))
-            self.buttons[i]["action"]()   # may start a transition or replace the screen; touch nothing after
+            self._press(self.buttons[i])   # may start a transition or replace the screen; touch nothing after
 
     # ----- transition gates ------------------------------------------
 

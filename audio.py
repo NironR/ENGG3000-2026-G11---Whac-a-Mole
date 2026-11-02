@@ -24,11 +24,11 @@ EFFECTS = {
     "golden":   {"file": "Golden Hammer wack.wav", "volume": 800, "voices": 3, "default_ms": 500},
     "gameover": {"file": "Game Over.wav", "volume": 800, "voices": 1, "default_ms": 3000},
     "iain":     {"file": "Iain Scream.wav", "volume": 900, "voices": 1, "default_ms": 2500},
-    # Menu buttons: a tiny tick when the highlight moves, a two-note blip when one is pressed (two
-    # variations; menus.py picks one at random so repeated presses don't sound identical)
+    # Menu buttons: a tiny tick when the highlight moves; a lower blip when a button goes into a
+    # screen and a higher one when it goes back to the home screen
     "hover":    {"file": "menu_hover.wav", "volume": 450, "voices": 2, "default_ms": 25},
-    "press":    {"file": "menu_press.wav", "volume": 650, "voices": 2, "default_ms": 115},
-    "press2":   {"file": "menu_press_2.wav", "volume": 650, "voices": 2, "default_ms": 115},
+    "enter":    {"file": "menu_enter.wav", "volume": 650, "voices": 2, "default_ms": 115},
+    "back":     {"file": "menu_back.wav", "volume": 650, "voices": 2, "default_ms": 115},
 }
 
 _available = sys.platform == "win32"
