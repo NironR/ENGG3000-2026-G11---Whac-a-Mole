@@ -7,8 +7,14 @@ BluetoothSerial SerialBT;
 //Ultrasonic sensor pins
 int echoPin1 = 23;
 int trigPin1 = 18;
+#if BOX_ID == 2
+// Box 2's sensor 2 is wired to 25/26 instead of 21/19 (its first ESP32's 21/19 didn't work).
+int echoPin2 = 26;
+int trigPin2 = 25;
+#else
 int echoPin2 = 19;
 int trigPin2 = 21;
+#endif
 
 const unsigned long ECHO_TIMEOUT_US = 15000;
 const unsigned long ECHO_START_US = 2000;
