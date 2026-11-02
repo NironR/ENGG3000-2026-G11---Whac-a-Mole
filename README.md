@@ -3,7 +3,7 @@
   <a href="https://choosealicense.com/licenses/mit/">
     <img src="https://img.shields.io/badge/License-MIT-brightgreen"/>
   </a>
-  <img src="https://img.shields.io/badge/Version-0.3.0-blue"/>
+  <img src="https://img.shields.io/badge/Version-0.4.0-blue"/>
 </p>
 <h1 align="center">
   ENGG3000 Group 11 - Whac-a-Mole
@@ -139,23 +139,34 @@ for the use of ninja cyborg used for our background audio.
 
 ## Changelog
 ### Unreleased
-#### Added
-- Background music that changes with difficulty, and a hammer hit sound.
-- Redesigned fullscreen menus.
-- `F10` debug key to force game over.
-- Automated tests for the leaderboard, difficulty and scoring, run on every pull request.
-- Packaged Windows `.exe` build (PyInstaller, one file).
-
-#### Changed
-- Sensor 1 Echo moved from GPIO5 (a boot strapping pin) to GPIO23. Rewire each box to match.
-- Readings in the sensors' blind zone are dropped, and the player is no longer averaged with the wall.
-- The leaderboard ignores corrupt entries and saves via a temp file, so a failed save can't wipe it.
-
 #### Planned
 - One 4xAA NiMH pack per sensor box, to stop brownout resets when Bluetooth starts.
-- Firmware: reduce latency and noise.
-- Buffs and debuffs, e.g. a mirrored-controls mole and a hammer-breaking mole that ends the game.
+- More buffs and debuffs, e.g. a mirrored-controls mole.
 - Setup and calibration guides.
+
+### 0.4.0 - 2026-11-02
+#### Added
+- Packaged Windows `.exe` build (PyInstaller, one file), published as a GitHub release.
+- Special moles: Golden (Golden Hammer, x2 points for 5 s), Time (+5 s), Combo (+2 combo and a shield) and Iain, who ends the game if hit.
+- Auto-pause with a "PLAYER NOT DETECTED" banner when no box sees anyone (only when all boxes are connected).
+- Background music that changes with difficulty, menu music, and hit, Golden Hammer, game-over and Iain sounds.
+- 8-bit menu sounds: hover tick, enter blip and back blip.
+- Redesigned fullscreen menus, including a mole guide.
+- `F10` debug key to force game over.
+- Automated tests for the leaderboard, difficulty, scoring, special moles, pause and mouse aiming, run with a linter on every pull request.
+
+#### Changed
+- The start-game transition is now steel doors with a clang (~1.8 s), and the menu music stops when they shut.
+- Normal hits no longer add time; only the Time Mole does.
+- Sensor 1 Echo moved from GPIO5 (a boot strapping pin) to GPIO23. Rewire each box to match.
+- Readings in the sensors' blind zone are dropped, and the player is no longer averaged with the wall.
+- Firmware sends each reading as one Bluetooth write, and the echo timeout is 12500 µs (about 2.14 m).
+- The leaderboard ignores corrupt entries and saves via a temp file, so a failed save can't wipe it.
+
+#### Fixed
+- One error could freeze the hammer for the rest of a session.
+- A pause could cost the player their combo.
+- Mouse mode: pointing at a top hole hit the mole below it, and aiming at a mole's head didn't hit it.
 
 ### 0.3.0 - 2026-10-05
 #### Added
