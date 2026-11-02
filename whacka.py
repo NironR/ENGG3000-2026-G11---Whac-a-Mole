@@ -2308,10 +2308,9 @@ def poll_mouse_frame():
                 clamp=MOUSE_CLAMP_TO_PLAYFIELD
             )
 
-            # If the pointer is over the mole sprite itself, treat it as being on that hole's
-            # centre. This makes the mole easier to hit with the mouse.
-            if mole is not None and mole_image_id in container.find_overlapping(px, py, px, py):
-                physical_position = (mole["x_m"], mole["y_m"])
+            # No snapping to the mole sprite: a front-row sprite is drawn over the back-row hole
+            # above it, so pointing at the top hole used to hit the mole below (and a mole rising
+            # there was hit the moment it came up).
 
             if physical_position is not None:
 
